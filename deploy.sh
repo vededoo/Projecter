@@ -99,14 +99,14 @@ generate_changelog() {
     fi
     while IFS= read -r commit; do
         [ -z "$commit" ] && continue
-        if   [[ "$commit" == feat:*    ]] || [[ "$commit" == feature:* ]]; then features="${features}- ${commit#*: }\n"
-        elif [[ "$commit" == fix:*     ]] || [[ "$commit" == bugfix:*  ]]; then fixes="${fixes}- ${commit#*: }\n"
-        elif [[ "$commit" == docs:*    ]]; then docs="${docs}- ${commit#*: }\n"
-        elif [[ "$commit" == refactor:*]]; then refactors="${refactors}- ${commit#*: }\n"
-        elif [[ "$commit" == perf:*    ]]; then perfs="${perfs}- ${commit#*: }\n"
-        elif [[ "$commit" == style:*   ]]; then styles="${styles}- ${commit#*: }\n"
-        elif [[ "$commit" == test:*    ]]; then tests="${tests}- ${commit#*: }\n"
-        elif [[ "$commit" == chore:*   ]]; then chores="${chores}- ${commit#*: }\n"
+        if   [[ "$commit" == feat:*     ]] || [[ "$commit" == feature:* ]]; then features="${features}- ${commit#*: }\n"
+        elif [[ "$commit" == fix:*      ]] || [[ "$commit" == bugfix:*  ]]; then fixes="${fixes}- ${commit#*: }\n"
+        elif [[ "$commit" == docs:*     ]]; then docs="${docs}- ${commit#*: }\n"
+        elif [[ "$commit" == refactor:* ]]; then refactors="${refactors}- ${commit#*: }\n"
+        elif [[ "$commit" == perf:*     ]]; then perfs="${perfs}- ${commit#*: }\n"
+        elif [[ "$commit" == style:*    ]]; then styles="${styles}- ${commit#*: }\n"
+        elif [[ "$commit" == test:*     ]]; then tests="${tests}- ${commit#*: }\n"
+        elif [[ "$commit" == chore:*    ]]; then chores="${chores}- ${commit#*: }\n"
         elif [[ ! "$commit" == *"Déploiement"* ]] && [[ ! "$commit" == *"Restauration"* ]]; then
             others="${others}- ${commit}\n"
         fi
