@@ -1,0 +1,11 @@
+# Projecter ROOT .gitignore
+
+# PRD (clone séparé via deploy.sh)
+Projecter_prd/
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# Logs (PM2 root-level)
+logs/
