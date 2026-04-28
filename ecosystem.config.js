@@ -66,38 +66,42 @@ module.exports = {
     },
 
     // ═══════════════════════════════════════════
-    // PRODUCTION - Serveur Backend (à activer après 1er déploiement)
+    // PRODUCTION - Serveur Backend
     // ═══════════════════════════════════════════
-    // {
-    //   name: 'projecter_prd_server',
-    //   cwd: './Projecter_prd/Projecter_dev/server',
-    //   script: 'src/app.js',
-    //   watch: false,
-    //   env: { NODE_ENV: 'production', PORT: 5051, HOST: '0.0.0.0' },
-    //   log_file: 'logs/prd_server_combined.log',
-    //   out_file: 'logs/prd_server_out.log',
-    //   error_file: 'logs/prd_server_error.log',
-    //   time: true,
-    //   autorestart: true,
-    //   max_memory_restart: '500M',
-    // },
+    {
+      name: 'projecter_prd_server',
+      cwd: './Projecter_prd/Projecter_dev/server',
+      script: 'src/app.js',
+      watch: false,
+      env: {
+        NODE_ENV: 'production',
+        PORT: 5051,
+        HOST: '0.0.0.0',
+      },
+      log_file: 'logs/prd_server_combined.log',
+      out_file: 'logs/prd_server_out.log',
+      error_file: 'logs/prd_server_error.log',
+      time: true,
+      autorestart: true,
+      max_memory_restart: '500M',
+    },
 
     // ═══════════════════════════════════════════
     // PRODUCTION - Client React (serve build)
     // ═══════════════════════════════════════════
-    // {
-    //   name: 'projecter_prd_client',
-    //   cwd: './Projecter_prd/Projecter_dev/client',
-    //   script: 'npx',
-    //   args: 'serve -s build --listen 3051',
-    //   watch: false,
-    //   env: { NODE_ENV: 'production' },
-    //   log_file: 'logs/prd_client_combined.log',
-    //   out_file: 'logs/prd_client_out.log',
-    //   error_file: 'logs/prd_client_error.log',
-    //   time: true,
-    //   autorestart: true,
-    //   max_memory_restart: '500M',
-    // },
+    {
+      name: 'projecter_prd_client',
+      cwd: './Projecter_prd/Projecter_dev/client',
+      script: 'npx',
+      args: 'serve -s build --listen 3051',
+      watch: false,
+      env: { NODE_ENV: 'production' },
+      log_file: 'logs/prd_client_combined.log',
+      out_file: 'logs/prd_client_out.log',
+      error_file: 'logs/prd_client_error.log',
+      time: true,
+      autorestart: true,
+      max_memory_restart: '500M',
+    },
   ],
 };
