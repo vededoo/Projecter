@@ -280,6 +280,20 @@ fi
 echo "✅ Build du client réussi !"
 
 # ─────────────────────────────────────────────────────────
+# ÉTAPE 6bis : Migrations DB (Projecter_prd)
+# ─────────────────────────────────────────────────────────
+
+echo ""
+echo "🗄️  Application des migrations de DB sur Projecter_prd..."
+cd "$PROD_APP_DIR/server"
+if PGDATABASE=Projecter_prd npm run migrate; then
+    echo "✅ Migrations DB OK"
+else
+    echo "❌ ERREUR: les migrations de DB ont échoué."
+    exit 1
+fi
+
+# ─────────────────────────────────────────────────────────
 # ÉTAPE 7 : Redémarrer PM2 de production
 # ─────────────────────────────────────────────────────────
 
