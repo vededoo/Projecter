@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0] - 2026-04-29
+
+## ✨ Nouvelles fonctionnalités
+- ajouter les users via MS Graph
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v0.1.0
+
 ## [0.1.0] - 2026-04-28
 
 ## ✨ Nouvelles fonctionnalités
