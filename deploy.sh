@@ -245,14 +245,32 @@ echo "   - client/.env : PORT=$PRD_CLIENT_PORT, API→/api (via Caddy)"
 echo ""
 echo "📦 Installation des dépendances serveur..."
 cd "$PROD_APP_DIR/server"
-npm install --production 2>&1 | tail -1
+rm -rf node_modules
+if [ -f "$DEV_DIR/server/package-lock.json" ]; then
+    cp "$DEV_DIR/server/package-lock.json" .
+fi
+if ! npm ci --omit=dev; then
+    echo "❌ npm ci server a échoué"
+    exit 1
+fi
+if ! npm ls --omit=dev --all >/dev/null 2>&1; then
+    echo "❌ server : node_modules incomplet"
+    npm ls --omit=dev --all 2>&1 | grep -E "missing|UNMET|invalid" | head -10
+    exit 1
+fi
 
 echo "🔨 Build du client pour la production..."
 cd "$PROD_APP_DIR/client"
 echo "🧹 Nettoyage des caches..."
-rm -rf node_modules/.cache tsconfig.tsbuildinfo .tsbuildinfo build
+rm -rf node_modules tsconfig.tsbuildinfo .tsbuildinfo build
 
-npm install --legacy-peer-deps
+if [ -f "$DEV_DIR/client/package-lock.json" ]; then
+    cp "$DEV_DIR/client/package-lock.json" .
+fi
+if ! npm ci --legacy-peer-deps; then
+    echo "❌ npm ci client a échoué"
+    exit 1
+fi
 npm run build
 
 if [ $? -ne 0 ]; then

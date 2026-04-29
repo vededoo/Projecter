@@ -40,8 +40,36 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
 button.btn { background: var(--accent); color: #fff; border: none;
   padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 button.btn:hover { background: #5a98e8; }
+button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+button.btn.btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+button.btn.btn-secondary:hover { background: var(--border); }
+button.btn.btn-danger { background: var(--red); }
+button.btn.btn-danger:hover { background: #d83a32; }
+button.btn.btn-ghost { background: transparent; color: var(--muted); padding: 4px 8px; }
+button.btn.btn-ghost:hover { background: var(--panel-2); color: var(--text); }
 input, select, textarea { background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; font-size: 13px; width: 100%; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+input.invalid, select.invalid, textarea.invalid { border-color: var(--red); }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; margin-top: 8px; }
+.field-error { color: var(--red); font-size: 11px; margin-top: 2px; }
 .tree-node { padding: 4px 0; }
 .tree-children { margin-left: 18px; border-left: 1px solid var(--border); padding-left: 10px; }
+
+/* ─── Modal / dialog ──────────────────────────────────────────────────── */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  width: 100%; max-width: 720px; max-height: 90vh; display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
+.modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; }
+.modal-header h3 { margin: 0; font-size: 16px; }
+.modal-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+.modal-footer { padding: 12px 18px; border-top: 1px solid var(--border);
+  display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.modal .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+.modal .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 16px; }
+@media (max-width: 600px) {
+  .modal .grid-2, .modal .grid-3 { grid-template-columns: 1fr; }
+}

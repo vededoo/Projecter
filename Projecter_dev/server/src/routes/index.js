@@ -19,6 +19,11 @@ router.patch('/projects/:id', projects.update);
 
 // Contacts & competency centers
 router.get('/contacts', contacts.list);
+router.get('/contacts/facets', contacts.facets);
+router.get('/contacts/:id', contacts.get);
+router.post('/contacts', contacts.create);
+router.patch('/contacts/:id', contacts.update);
+router.delete('/contacts/:id', contacts.remove);
 router.get('/competency-centers', contacts.tree);
 
 // Risks
