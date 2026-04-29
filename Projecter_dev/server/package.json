@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "node src/app.js",
-    "mcp": "node src/mcp/server.js"
+    "mcp": "node src/mcp/server.js",
+    "migrate": "node src/scripts/migrate.js",
+    "migrate:status": "node src/scripts/migrate.js --status",
+    "migrate:dry-run": "node src/scripts/migrate.js --dry-run"
   },
   "dependencies": {
     "express": "^4.19.2",
