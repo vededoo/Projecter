@@ -55,7 +55,7 @@ function ManagerPicker({
       try {
         const r: any = await api.get(`/contacts?q=${encodeURIComponent(q.trim())}&pageSize=10&active=true&sort=last_name`);
         setResults(r.data
-          .map((d: any) => ({ id: parseInt(d.id, 10), ...d.attributes }))
+          .map((d: any) => ({ ...d.attributes, id: parseInt(d.id, 10) }))
           .filter((c: ManagerSuggestion) => c.id !== excludeId));
       } catch { setResults([]); }
       finally { setLoading(false); }

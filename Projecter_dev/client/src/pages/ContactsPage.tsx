@@ -232,7 +232,7 @@ export function ContactsPage() {
     setLoading(true); setError(null);
     api.get<ListResponse>(`/contacts?${params.toString()}`)
       .then((r) => {
-        setItems(r.data.map((d) => ({ id: parseInt(d.id, 10), ...d.attributes })));
+        setItems(r.data.map((d) => ({ ...d.attributes, id: parseInt(d.id, 10) })));
         setMeta(r.meta);
       })
       .catch((e) => setError(e.message))
