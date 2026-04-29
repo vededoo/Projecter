@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2] - 2026-04-29
+
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.0.1
+## 🔹 Autres changements
+- fix(client): spread attributes before id override (TS2783)
+
 ## [1.0.1] - 2026-04-29
 
 ## 📚 Documentation
