@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1] - 2026-04-29
+
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.0.0
+## 🔹 Autres changements
+- fix(client): target es2015 to allow Set spread (fix TS2802 in prod build)
+
 ## [1.0.0] - 2026-04-29
 
 ## ✨ Nouvelles fonctionnalités
