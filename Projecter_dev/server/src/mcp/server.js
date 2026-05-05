@@ -351,6 +351,275 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
+// Tool: list_open_actions
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'list_open_actions',
+  'List all open actions (status=open) across meetings, with owner, deadline, and project context. Optionally filter by project or overdue only.',
+  {
+    project_id_or_slug: z.string().optional().describe('Restrict to actions from meetings of this project (numeric id or slug)'),
+    overdue_only: z.boolean().default(false).optional().describe('If true, return only overdue actions (deadline < today)'),
+    owner_contact_id: z.number().int().optional().describe('Filter by owner contact id'),
+    limit: z.number().int().min(1).max(500).default(100).optional(),
+  },
+  async ({ project_id_or_slug, overdue_only = false, owner_contact_id, limit = 100 }) => {
+    try {
+      const conds = [];
+      const params = [];
+      if (project_id_or_slug) {
+        const { rows } = await query(
+          `SELECT id FROM projects WHERE id::text = $1 OR slug = $1 LIMIT 1`,
+          [project_id_or_slug]
+        );
+        if (!rows[0]) return err(`Project not found: ${project_id_or_slug}`);
+        params.push(rows[0].id);
+        conds.push(`project_id = $${params.length}`);
+      }
+      if (overdue_only) {
+        conds.push('is_overdue = true');
+      }
+      if (owner_contact_id) {
+        params.push(owner_contact_id);
+        conds.push(`id IN (SELECT id FROM v_open_actions WHERE owner_id = $${params.length})`);
+      }
+      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+      params.push(limit);
+      const { rows } = await query(
+        `SELECT * FROM v_open_actions ${where} ORDER BY deadline ASC NULLS LAST LIMIT $${params.length}`,
+        params
+      );
+      return ok({ count: rows.length, actions: rows });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: get_meeting_actions
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'get_meeting_actions',
+  'Get structured actions, decisions, and topics extracted from a specific meeting.',
+  {
+    meeting_id: z.number().int().describe('Projecter meeting id'),
+  },
+  async ({ meeting_id }) => {
+    try {
+      const [meetingRes, actionsRes, decisionsRes, topicsRes] = await Promise.all([
+        query(
+          `SELECT m.id, m.title, m.type, m.start_at, m.extraction_status,
+                  m.extracted_at, m.validated_at, m.executive_summary,
+                  p.code AS project_code, p.title AS project_title
+             FROM meetings m LEFT JOIN projects p ON p.id = m.project_id
+            WHERE m.id = $1`,
+          [meeting_id]
+        ),
+        query(
+          `SELECT a.id, a.description, a.deadline, a.status, a.is_overdue,
+                  a.owner_raw, a.owner_name, a.owner_email, a.notes
+             FROM v_open_actions a WHERE a.meeting_id = $1
+            UNION ALL
+           SELECT a.id, a.description, a.deadline, a.status::text,
+                  false AS is_overdue, a.owner_raw,
+                  c.last_name || ' ' || COALESCE(c.first_name,'') AS owner_name,
+                  c.email AS owner_email, a.notes
+             FROM meeting_actions a LEFT JOIN contacts c ON c.id = a.owner_id
+            WHERE a.meeting_id = $1 AND a.status NOT IN ('open','overdue')
+            ORDER BY deadline ASC NULLS LAST`,
+          [meeting_id]
+        ),
+        query(
+          `SELECT id, description, impact, position FROM meeting_decisions WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`,
+          [meeting_id]
+        ),
+        query(
+          `SELECT id, position, title, summary, type FROM meeting_topics WHERE meeting_id = $1 ORDER BY position, id`,
+          [meeting_id]
+        ),
+      ]);
+      if (!meetingRes.rows[0]) return err(`Meeting not found: ${meeting_id}`);
+      return ok({
+        meeting: meetingRes.rows[0],
+        actions:   actionsRes.rows,
+        decisions: decisionsRes.rows,
+        topics:    topicsRes.rows,
+      });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: review_extraction
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'review_extraction',
+  'Side-by-side review of a meeting: raw transcript/minutes vs structured extracted data. Useful for validating or debugging an LLM extraction.',
+  {
+    meeting_id: z.number().int().describe('Projecter meeting id'),
+    include_raw: z.boolean().default(true).optional().describe('Include raw_transcript and minutes in the response (can be long)'),
+  },
+  async ({ meeting_id, include_raw = true }) => {
+    try {
+      const { rows } = await query(
+        `SELECT id, title, type, start_at, extraction_status, extraction_error,
+                extracted_at, validated_at, executive_summary,
+                transformer_transcript_id,
+                ${include_raw ? 'raw_transcript, minutes, decisions AS decisions_raw, actions AS actions_raw,' : ''}
+                (SELECT COUNT(*) FROM meeting_actions  WHERE meeting_id = m.id) AS action_count,
+                (SELECT COUNT(*) FROM meeting_decisions WHERE meeting_id = m.id) AS decision_count,
+                (SELECT COUNT(*) FROM meeting_topics    WHERE meeting_id = m.id) AS topic_count
+           FROM meetings m WHERE id = $1`,
+        [meeting_id]
+      );
+      if (!rows[0]) return err(`Meeting not found: ${meeting_id}`);
+      const meeting = rows[0];
+      const [actionsRes, decisionsRes, topicsRes] = await Promise.all([
+        query(`SELECT * FROM meeting_actions WHERE meeting_id = $1 ORDER BY id`, [meeting_id]),
+        query(`SELECT * FROM meeting_decisions WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`, [meeting_id]),
+        query(`SELECT * FROM meeting_topics WHERE meeting_id = $1 ORDER BY position, id`, [meeting_id]),
+      ]);
+      return ok({
+        meeting,
+        structured: {
+          actions:   actionsRes.rows,
+          decisions: decisionsRes.rows,
+          topics:    topicsRes.rows,
+        },
+      });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: ingest_meeting_extraction
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'ingest_meeting_extraction',
+  [
+    'Write structured extraction results for a meeting: executive summary, topics, decisions, and actions.',
+    'Each call REPLACES all existing structured data for that meeting (idempotent — safe to re-ingest).',
+    'owner_raw names will be resolved to contact ids via case-insensitive last_name match.',
+    'Returns the inserted counts and any unresolved owner names.',
+  ].join(' '),
+  {
+    meeting_id: z.number().int().describe('Projecter meeting id'),
+    executive_summary: z.string().optional().describe('10-line executive summary generated by LLM'),
+    raw_transcript: z.string().optional().describe('Full raw text source (transcript or pasted CR). Stored as immutable source of truth.'),
+    topics: z.array(z.object({
+      position: z.number().int(),
+      title: z.string(),
+      summary: z.string().optional(),
+      type: z.enum(['information', 'decision', 'action', 'open_point', 'other']).default('other'),
+    })).default([]).optional(),
+    decisions: z.array(z.object({
+      description: z.string(),
+      impact: z.string().optional(),
+      position: z.number().int().optional(),
+    })).default([]).optional(),
+    actions: z.array(z.object({
+      description: z.string(),
+      owner_raw: z.string().optional().describe('Name as extracted by LLM — will be resolved to contacts.id'),
+      deadline: z.string().optional().describe('ISO date YYYY-MM-DD'),
+      notes: z.string().optional(),
+    })).default([]).optional(),
+  },
+  async ({ meeting_id, executive_summary, raw_transcript, topics = [], decisions = [], actions = [] }) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verify meeting exists
+      const { rows: [meeting] } = await client.query(
+        `SELECT id FROM meetings WHERE id = $1`, [meeting_id]
+      );
+      if (!meeting) { await client.query('ROLLBACK'); return err(`Meeting not found: ${meeting_id}`); }
+
+      // Update meeting metadata
+      const updateFields = ['extraction_status = \'success\'', 'extracted_at = NOW()'];
+      const updateParams = [meeting_id];
+      if (executive_summary !== undefined) { updateParams.push(executive_summary); updateFields.push(`executive_summary = $${updateParams.length}`); }
+      if (raw_transcript !== undefined)    { updateParams.push(raw_transcript);    updateFields.push(`raw_transcript = $${updateParams.length}`); }
+      await client.query(
+        `UPDATE meetings SET ${updateFields.join(', ')} WHERE id = $1`,
+        updateParams
+      );
+
+      // Delete existing structured data (idempotent)
+      await client.query('DELETE FROM meeting_actions   WHERE meeting_id = $1', [meeting_id]);
+      await client.query('DELETE FROM meeting_decisions WHERE meeting_id = $1', [meeting_id]);
+      await client.query('DELETE FROM meeting_topics    WHERE meeting_id = $1', [meeting_id]);
+
+      // Insert topics
+      for (const t of topics) {
+        await client.query(
+          `INSERT INTO meeting_topics (meeting_id, position, title, summary, type)
+           VALUES ($1, $2, $3, $4, $5::topic_type)`,
+          [meeting_id, t.position, t.title, t.summary || null, t.type || 'other']
+        );
+      }
+
+      // Insert decisions
+      for (let i = 0; i < decisions.length; i++) {
+        const d = decisions[i];
+        await client.query(
+          `INSERT INTO meeting_decisions (meeting_id, description, impact, position)
+           VALUES ($1, $2, $3, $4)`,
+          [meeting_id, d.description, d.impact || null, d.position ?? i + 1]
+        );
+      }
+
+      // Insert actions — resolve owner names to contacts.id
+      const unresolved = [];
+      for (const a of actions) {
+        let owner_id = null;
+        if (a.owner_raw) {
+          const nameParts = a.owner_raw.trim().split(/\s+/);
+          // Try last_name match first, then first+last
+          const { rows: contacts } = await client.query(
+            `SELECT id FROM contacts
+              WHERE last_name ILIKE $1 OR (last_name ILIKE $2 AND first_name ILIKE $3)
+              LIMIT 1`,
+            [
+              nameParts[nameParts.length - 1],
+              nameParts[nameParts.length - 1],
+              nameParts[0],
+            ]
+          );
+          if (contacts[0]) {
+            owner_id = contacts[0].id;
+          } else {
+            unresolved.push(a.owner_raw);
+          }
+        }
+        await client.query(
+          `INSERT INTO meeting_actions (meeting_id, owner_id, owner_raw, description, deadline, notes)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [meeting_id, owner_id, a.owner_raw || null, a.description, a.deadline || null, a.notes || null]
+        );
+      }
+
+      await client.query('COMMIT');
+      return ok({
+        meeting_id,
+        inserted: { topics: topics.length, decisions: decisions.length, actions: actions.length },
+        unresolved_owners: unresolved,
+      });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      // Mark extraction as failed
+      try {
+        await pool.query(
+          `UPDATE meetings SET extraction_status = 'failed', extraction_error = $2 WHERE id = $1`,
+          [meeting_id, e.message]
+        );
+      } catch {}
+      return err(e.message);
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
 // Tool: db_query  (read-only escape hatch)
 // ─────────────────────────────────────────────────────────────────────────
 server.tool(
@@ -400,7 +669,14 @@ server.resource(
 - risks(id, project_id, label, probability, impact, severity, status, owner_contact_id, mitigation_plan, due_date)
 - documents(id, project_id, type[mandate|briefing_note|dip|project_sheet|...], version, status, attributes)
 - document_files(id, document_id, storage_path, extracted_text)
-- meetings(id, project_id, title, type, start_at, transformer_transcript_id)
+- meetings(id, project_id, title, type, start_at, transformer_transcript_id,
+           extraction_status[pending|success|failed|skipped], executive_summary,
+           raw_transcript, minutes[raw fallback], decisions[raw fallback], actions[raw fallback])
+- meeting_attendees(id, meeting_id, contact_id, status[present|excused|absent|invited], role)
+- meeting_topics(id, meeting_id, position, title, summary, type[information|decision|action|open_point|other])
+- meeting_decisions(id, meeting_id, description, impact, position)
+- meeting_actions(id, meeting_id, owner_id→contacts, owner_raw, description, deadline, status[open|done|cancelled|overdue], notes)
+- v_open_actions VIEW — open actions with owner/meeting/project context
 - timeline_events(id, project_id, label, type, event_date)
 
 Full DDL: database/migrations/001_init_schema.sql
