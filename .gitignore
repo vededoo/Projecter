@@ -1,11 +1,33 @@
-# Projecter ROOT .gitignore
+# Projecter .gitignore
 
 # PRD (clone séparé via deploy.sh)
 Projecter_prd/
+
+# Dépendances
+node_modules/
+
+# Variables d'environnement
+.env
+.env.local
 
 # OS
 .DS_Store
 **/.DS_Store
 
-# Logs (PM2 root-level)
+# Logs
 logs/
+*.log
+
+# Build client
+client/build/
+coverage/
+
+# Storage (données runtime)
+storage/uploads/*
+storage/generated/*
+!storage/uploads/.gitkeep
+!storage/generated/.gitkeep
+
+# Editeurs
+.vscode/
+.idea/
