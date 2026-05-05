@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.3] - 2026-05-05
+
+## ✨ Nouvelles fonctionnalités
+- mini migration runner + UI projet creation
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.0.2
+## 🔹 Autres changements
+- feat(db): mini migration runner + UI projet (création)
+- feat(db): migration 002 - contacts Azure/Graph sync columns
+
 ## [1.0.2] - 2026-04-29
 
 ## 📚 Documentation
