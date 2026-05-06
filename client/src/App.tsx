@@ -5,8 +5,9 @@ import { ContactsPage } from './pages/ContactsPage';
 import { CompetencyCentersPage } from './pages/CompetencyCentersPage';
 import { RisksPage } from './pages/RisksPage';
 import { MeetingsPage } from './pages/MeetingsPage';
+import { SourcesPage } from './pages/SourcesPage';
 
-type View = 'projects' | 'contacts' | 'ccs' | 'risks' | 'meetings';
+type View = 'projects' | 'contacts' | 'ccs' | 'risks' | 'meetings' | 'sources';
 
 const NAV: { key: View; label: string }[] = [
   { key: 'projects',  label: 'Projects' },
@@ -14,6 +15,7 @@ const NAV: { key: View; label: string }[] = [
   { key: 'ccs',       label: 'Competency Centers' },
   { key: 'risks',     label: 'Risks' },
   { key: 'meetings',  label: 'Meetings' },
+  { key: 'sources',   label: 'Sources' },
 ];
 
 function App() {
@@ -30,6 +32,7 @@ function App() {
       case 'ccs':      return <CompetencyCentersPage />;
       case 'risks':    return <RisksPage />;
       case 'meetings': return <MeetingsPage />;
+      case 'sources':  return <SourcesPage />;
     }
   };
 

@@ -81,11 +81,13 @@ router.delete('/meetings/:id', meetings.remove);
 router.post('/meetings/:id/attendees', meetings.addAttendee);
 router.delete('/meetings/:id/attendees/:contactId', meetings.removeAttendee);
 
-// Project sources
-router.get('/projects/:projectId/sources', sources.list);
-router.post('/projects/:projectId/sources/upload', upload.single('file'), sources.upload);
-router.get('/project-sources/:id/content', sources.getContent);
-router.patch('/project-sources/:id', sources.update);
-router.delete('/project-sources/:id', sources.remove);
+// Sources (documents de référence — N-to-N projets)
+router.get('/sources', sources.list);
+router.post('/sources/upload', upload.single('file'), sources.upload);
+router.get('/sources/:id/content', sources.getContent);
+router.patch('/sources/:id', sources.update);
+router.delete('/sources/:id', sources.remove);
+router.post('/sources/:id/projects/:projectId', sources.linkProject);
+router.delete('/sources/:id/projects/:projectId', sources.unlinkProject);
 
 module.exports = router;

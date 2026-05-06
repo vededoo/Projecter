@@ -651,10 +651,161 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
-// Tool: list_project_sources
+// Tool: list_sources
 // ─────────────────────────────────────────────────────────────────────────
 server.tool(
-  'list_project_sources',
+  'list_sources',
+  'List all reference documents (sources). A source can be linked to multiple projects. Filter by project or source_type.',
+  {
+    project_id_or_slug: z.string().optional().describe('Filter sources linked to this project (numeric id or slug)'),
+    source_type: z.string().optional().describe('Filter by type (pc_list, directive, spec, contract, ...)'),
+  },
+  async ({ project_id_or_slug, source_type }) => {
+    try {
+      const conds = []; const params = [];
+      if (project_id_or_slug) {
+        const { rows: pj } = await query(
+          `SELECT id FROM projects WHERE id::text = $1 OR slug = $1 LIMIT 1`,
+          [project_id_or_slug]
+        );
+        if (!pj[0]) return err(`Project not found: ${project_id_or_slug}`);
+        params.push(pj[0].id);
+        conds.push(`id IN (SELECT source_id FROM source_projects WHERE project_id = $${params.length})`);
+      }
+      if (source_type) { params.push(source_type); conds.push(`source_type = $${params.length}`); }
+      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+      const { rows } = await query(
+        `SELECT id, title, source_type, description, extraction_status,
+                extracted_chars, original_filename, mime_type, file_size_bytes,
+                projects, created_at, updated_at
+           FROM v_sources ${where} ORDER BY created_at DESC`,
+        params
+      );
+      return ok({ count: rows.length, sources: rows });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: get_source_content
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'get_source_content',
+  'Get the full extracted text of a source document. Use offset/limit for large documents.',
+  {
+    source_id: z.number().int().describe('sources.id'),
+    offset: z.number().int().min(0).default(0).optional().describe('Character offset for pagination'),
+    limit:  z.number().int().min(1).max(80000).default(40000).optional().describe('Max characters to return'),
+  },
+  async ({ source_id, offset = 0, limit = 40000 }) => {
+    try {
+      const { rows } = await query(
+        `SELECT id, title, source_type, description, extraction_status,
+                extraction_error, original_filename, mime_type,
+                length(extracted_text) AS total_chars,
+                substring(extracted_text FROM $2 FOR $3) AS content_chunk,
+                created_at, updated_at
+           FROM sources WHERE id = $1`,
+        [source_id, offset + 1, limit]
+      );
+      if (!rows[0]) return err(`Source not found: ${source_id}`);
+      const r = rows[0];
+      return ok({
+        id: r.id, title: r.title, source_type: r.source_type,
+        description: r.description, extraction_status: r.extraction_status,
+        extraction_error: r.extraction_error,
+        original_filename: r.original_filename, mime_type: r.mime_type,
+        total_chars: r.total_chars,
+        offset, returned_chars: (r.content_chunk || '').length,
+        has_more: offset + limit < (r.total_chars || 0),
+        content: r.content_chunk,
+      });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: create_source
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'create_source',
+  'Save a reference document (source) from chat context. The source can be linked to one or more projects via project_ids.',
+  {
+    title:           z.string().describe('Short descriptive title for this document'),
+    source_type:     z.string().optional().describe('Category: pc_list | directive | spec | contract | template | procedure | other'),
+    description:     z.string().optional().describe('Precise summary: what the document contains, key columns/sections, relevance'),
+    extracted_text:  z.string().optional().describe('Full text content extracted from the source document'),
+    project_ids:     z.array(z.number().int()).optional().describe('Projects this source is relevant for (can be empty — linked later)'),
+    original_filename: z.string().optional().describe('Original filename if known'),
+    mime_type:       z.string().optional(),
+  },
+  async ({ title, source_type, description, extracted_text, project_ids = [], original_filename, mime_type }) => {
+    try {
+      const status = extracted_text ? 'success' : 'pending';
+      const { rows } = await query(
+        `INSERT INTO sources
+           (title, source_type, description, extracted_text,
+            extraction_status, original_filename, mime_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, title, source_type, extraction_status,
+                   length(extracted_text) AS extracted_chars, created_at`,
+        [title, source_type || null, description || null,
+         extracted_text || null, status, original_filename || null, mime_type || null]
+      );
+      const sourceId = rows[0].id;
+      for (const pid of project_ids) {
+        await query(
+          `INSERT INTO source_projects (source_id, project_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [sourceId, pid]
+        );
+      }
+      return ok({ created: rows[0], linked_projects: project_ids });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: update_source
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'update_source',
+  'Update the content or metadata of an existing source (e.g. after re-reading an updated file).',
+  {
+    source_id:      z.number().int().describe('sources.id'),
+    title:          z.string().optional(),
+    source_type:    z.string().optional(),
+    description:    z.string().optional(),
+    extracted_text: z.string().optional().describe('Full updated text content'),
+  },
+  async ({ source_id, title, source_type, description, extracted_text }) => {
+    try {
+      const sets = [];
+      const params = [source_id];
+      if (title          !== undefined) { params.push(title);          sets.push(`title = $${params.length}`); }
+      if (source_type    !== undefined) { params.push(source_type);    sets.push(`source_type = $${params.length}`); }
+      if (description    !== undefined) { params.push(description);    sets.push(`description = $${params.length}`); }
+      if (extracted_text !== undefined) {
+        params.push(extracted_text);
+        sets.push(`extracted_text = $${params.length}`);
+        sets.push(`extraction_status = 'success'`);
+      }
+      if (!sets.length) return err('Nothing to update.');
+      await query(`UPDATE sources SET ${sets.join(', ')} WHERE id = $1`, params);
+      const { rows } = await query(
+        `SELECT id, title, source_type, extraction_status,
+                length(extracted_text) AS extracted_chars, updated_at
+           FROM sources WHERE id = $1`,
+        [source_id]
+      );
+      if (!rows[0]) return err(`Source not found: ${source_id}`);
+      return ok({ updated: rows[0] });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Resources: org snapshot + project list as readable resources
+// ─────────────────────────────────────────────────────────────────────────
   'List reference documents (sources) linked to a project: PC lists, directives, specs, contracts, etc.',
   {
     project_id_or_slug: z.string().describe('Project numeric id or slug'),
@@ -761,44 +912,6 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
-// Tool: update_project_source
-// ─────────────────────────────────────────────────────────────────────────
-server.tool(
-  'update_project_source',
-  'Update the content or metadata of an existing project source (e.g. after re-reading an updated file).',
-  {
-    source_id:      z.number().int().describe('project_sources.id'),
-    title:          z.string().optional(),
-    source_type:    z.string().optional(),
-    description:    z.string().optional(),
-    extracted_text: z.string().optional().describe('Full updated text content'),
-  },
-  async ({ source_id, title, source_type, description, extracted_text }) => {
-    try {
-      const sets = [];
-      const params = [source_id];
-      if (title          !== undefined) { params.push(title);          sets.push(`title = $${params.length}`); }
-      if (source_type    !== undefined) { params.push(source_type);    sets.push(`source_type = $${params.length}`); }
-      if (description    !== undefined) { params.push(description);    sets.push(`description = $${params.length}`); }
-      if (extracted_text !== undefined) {
-        params.push(extracted_text);
-        sets.push(`extracted_text = $${params.length}`);
-        sets.push(`extraction_status = 'success'`);
-      }
-      if (!sets.length) return err('Nothing to update.');
-      const { rows } = await query(
-        `UPDATE project_sources SET ${sets.join(', ')} WHERE id = $1
-         RETURNING id, title, source_type, extraction_status,
-                   length(extracted_text) AS extracted_chars, updated_at`,
-        params
-      );
-      if (!rows[0]) return err(`Source not found: ${source_id}`);
-      return ok({ updated: rows[0] });
-    } catch (e) { return err(e.message); }
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────
 // Resources: org snapshot + project list as readable resources
 // ─────────────────────────────────────────────────────────────────────────
 server.resource(
@@ -834,10 +947,12 @@ server.resource(
 - meeting_actions(id, meeting_id, owner_id→contacts, owner_raw, description, deadline, status[open|done|cancelled|overdue], notes)
 - v_open_actions VIEW — open actions with owner/meeting/project context
 - timeline_events(id, project_id, label, type, event_date)
-- project_sources(id, project_id, title, source_type, description, extracted_text,
-                  extraction_status[pending|success|failed|skipped], extraction_error,
-                  storage_path, original_filename, mime_type, file_size_bytes,
-                  uploaded_by_contact_id, created_at, updated_at)
+- sources(id, title, source_type, description, extracted_text,
+          extraction_status[pending|success|failed|skipped], extraction_error,
+          storage_path, original_filename, mime_type, file_size_bytes,
+          uploaded_by_contact_id, created_at, updated_at) — N-to-N with projects
+- source_projects(id, source_id, project_id, context)
+- v_sources VIEW — sources with projects[] aggregated as JSON
 
 Full DDL: database/migrations/001_init_schema.sql
 `;
