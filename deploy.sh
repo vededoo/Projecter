@@ -8,7 +8,7 @@
 # Pattern standard MSA :
 #  1. Vérifie qu'il n'y a pas de changements non commités (DEV)
 #  2. Génère un changelog depuis les commits conventionnels
-#  3. Bump version dans Projecter_dev/client/package.json
+#  3. Bump version dans client/package.json
 #  4. Tag annoté + push tag + main
 #  5. Met à jour CHANGELOG.md
 #  6. Si Projecter_prd absent → git clone (1er déploiement)
@@ -33,9 +33,9 @@ fi
 VERSION="$1"
 TAG_NAME="v$VERSION"
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEV_DIR="$BASE_DIR/Projecter_dev"
+DEV_DIR="$BASE_DIR"
 PROD_DIR="$BASE_DIR/Projecter_prd"
-PROD_APP_DIR="$PROD_DIR/Projecter_dev"   # structure imbriquée (clone du repo)
+PROD_APP_DIR="$PROD_DIR"
 
 REMOTE_URL="https://github.com/vededoo/Projecter.git"
 
@@ -211,8 +211,8 @@ if [ -f "$PROD_APP_DIR/server/.env" ]; then
     sed -i '' "s/NODE_ENV=development/NODE_ENV=production/" "$PROD_APP_DIR/server/.env" || true
     sed -i '' "s/PORT=$DEV_SERVER_PORT/PORT=$PRD_SERVER_PORT/" "$PROD_APP_DIR/server/.env" || true
     sed -i '' "s/PGDATABASE=$DEV_DB_NAME/PGDATABASE=$PRD_DB_NAME/" "$PROD_APP_DIR/server/.env" || true
-    sed -i '' "s|Projecter_dev/storage|Projecter_prd/Projecter_dev/storage|g" "$PROD_APP_DIR/server/.env" || true
-    sed -i '' "s|Projecter_dev/logs|Projecter_prd/Projecter_dev/logs|g" "$PROD_APP_DIR/server/.env" || true
+    sed -i '' "s|Projecter/storage|Projecter_prd/storage|g" "$PROD_APP_DIR/server/.env" || true
+    sed -i '' "s|Projecter/logs|Projecter_prd/logs|g" "$PROD_APP_DIR/server/.env" || true
     sed -i '' "s|CORS_ORIGINS=.*|CORS_ORIGINS=https://msa.hopto.org:60051,https://msa.hopto.org:6051,http://localhost:3051|" "$PROD_APP_DIR/server/.env" || true
 elif [ -f "$DEV_DIR/server/.env" ]; then
     echo "   📋 Copie server/.env depuis dev..."
@@ -220,8 +220,8 @@ elif [ -f "$DEV_DIR/server/.env" ]; then
     sed -i '' "s/NODE_ENV=development/NODE_ENV=production/" "$PROD_APP_DIR/server/.env"
     sed -i '' "s/PORT=$DEV_SERVER_PORT/PORT=$PRD_SERVER_PORT/" "$PROD_APP_DIR/server/.env"
     sed -i '' "s/PGDATABASE=$DEV_DB_NAME/PGDATABASE=$PRD_DB_NAME/" "$PROD_APP_DIR/server/.env"
-    sed -i '' "s|Projecter_dev/storage|Projecter_prd/Projecter_dev/storage|g" "$PROD_APP_DIR/server/.env"
-    sed -i '' "s|Projecter_dev/logs|Projecter_prd/Projecter_dev/logs|g" "$PROD_APP_DIR/server/.env"
+    sed -i '' "s|Projecter/storage|Projecter_prd/storage|g" "$PROD_APP_DIR/server/.env"
+    sed -i '' "s|Projecter/logs|Projecter_prd/logs|g" "$PROD_APP_DIR/server/.env"
     sed -i '' "s|CORS_ORIGINS=.*|CORS_ORIGINS=https://msa.hopto.org:60051,https://msa.hopto.org:6051,http://localhost:3051|" "$PROD_APP_DIR/server/.env"
 fi
 

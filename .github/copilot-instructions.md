@@ -14,6 +14,7 @@
 - **UI strings** : English only. Use `useNotifications()` / `useConfirm()`. No `alert()`, no `window.confirm()`, no empty `catch{}`. Voir `docs/shared-docs/3-PATTERNS/notifications-architecture.md`.
 - **Logging** : Winston + emojis (🚀 📥 ✅ ❌ 🗄️)
 - **PM2** : `pm2 restart projecter_dev_server` après modifs serveur
+- **package.json modifié** : toujours relancer `npm install` dans le dossier concerné et commiter `package-lock.json` avec les changements
 - **DB** : PostgreSQL `Projecter_dev` (user `ldurpel`). Ne jamais `psql` direct.
 - **Environnement DEV** : Travailler dans `Projecter_dev/client` et `Projecter_dev/server`
 - **ENUMs PostgreSQL** : Toujours caster (`$4::project_status`, `$5::urgence_level`)

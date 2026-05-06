@@ -4,21 +4,26 @@ const { serialize, parseAttributes, errorResponse } = require('../utils/jsonapi'
 const logger = require('../utils/logger');
 
 const COLS = `id, project_id, title, type, start_at, end_at, location, video_link,
-              transformer_transcript_id, minutes, decisions, actions, created_at, updated_at`;
+              transformer_transcript_id, minutes, decisions, actions,
+              raw_transcript, extraction_status, extraction_error,
+              extracted_at, validated_at, executive_summary, ai_report,
+              created_at, updated_at`;
 
 const FIELDS = ['title', 'type', 'start_at', 'end_at', 'location', 'video_link',
-                'transformer_transcript_id', 'minutes', 'decisions', 'actions'];
+                'transformer_transcript_id', 'minutes', 'decisions', 'actions',
+                'raw_transcript', 'extraction_status', 'executive_summary', 'ai_report'];
 
 const ENUM_CASTS = { type: '::meeting_type' };
 
 exports.list = async (req, res, next) => {
   try {
-    const { project_id, type, from, to } = req.query;
+    const { project_id, type, from, to, unlinked } = req.query;
     const conds = []; const params = [];
     if (project_id) { params.push(project_id); conds.push(`project_id = $${params.length}`); }
     if (type)       { params.push(type);       conds.push(`type = $${params.length}::meeting_type`); }
     if (from)       { params.push(from);       conds.push(`start_at >= $${params.length}::timestamptz`); }
     if (to)         { params.push(to);         conds.push(`start_at <= $${params.length}::timestamptz`); }
+    if (unlinked === '1') conds.push(`transformer_transcript_id IS NULL`);
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
     const { rows } = await query(
       `SELECT ${COLS} FROM meetings ${where} ORDER BY start_at DESC LIMIT 500`,

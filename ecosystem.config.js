@@ -20,7 +20,7 @@ module.exports = {
     // ═══════════════════════════════════════════
     {
       name: 'projecter_dev_server',
-      cwd: './Projecter_dev/server',
+      cwd: './server',
       script: 'src/app.js',
       watch: ['src'],
       ignore_watch: ['node_modules', 'logs', 'storage'],
@@ -42,7 +42,7 @@ module.exports = {
     // ═══════════════════════════════════════════
     {
       name: 'projecter_dev_client',
-      cwd: './Projecter_dev/client',
+      cwd: './client',
       script: 'npm',
       args: 'start',
       watch: false,
@@ -70,7 +70,7 @@ module.exports = {
     // ═══════════════════════════════════════════
     {
       name: 'projecter_prd_server',
-      cwd: './Projecter_prd/Projecter_dev/server',
+      cwd: './Projecter_prd/server',
       script: 'src/app.js',
       watch: false,
       env: {
@@ -91,7 +91,7 @@ module.exports = {
     // ═══════════════════════════════════════════
     {
       name: 'projecter_prd_client',
-      cwd: './Projecter_prd/Projecter_dev/client',
+      cwd: './Projecter_prd/client',
       script: 'npx',
       args: 'serve -s build --listen 3051',
       watch: false,

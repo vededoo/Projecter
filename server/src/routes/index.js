@@ -8,6 +8,7 @@ const members  = require('../controllers/projectMembersController');
 const documents = require('../controllers/documentsController');
 const meetings  = require('../controllers/meetingsController');
 const sources   = require('../controllers/sourcesController');
+const transformer = require('../controllers/transformerController');
 
 // Multer en mémoire — 20 Mo max
 const upload = multer({
@@ -80,6 +81,10 @@ router.patch('/meetings/:id', meetings.update);
 router.delete('/meetings/:id', meetings.remove);
 router.post('/meetings/:id/attendees', meetings.addAttendee);
 router.delete('/meetings/:id/attendees/:contactId', meetings.removeAttendee);
+// Transformer integration
+router.post('/meetings/:id/inject-transcript', transformer.injectTranscript);
+router.post('/meetings/:id/transcript-webhook', transformer.receiveTranscript);
+router.get('/transformer/texts/:id', transformer.getText);
 
 // Sources (documents de référence — N-to-N projets)
 router.get('/sources', sources.list);
