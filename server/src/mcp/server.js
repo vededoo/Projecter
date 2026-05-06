@@ -97,8 +97,14 @@ server.tool(
           [projectId]
         ),
         query(
-          `SELECT id, label, probability, impact, severity, status, mitigation_plan, due_date
-             FROM risks WHERE project_id = $1 ORDER BY severity DESC NULLS LAST, due_date ASC NULLS LAST`,
+          `SELECT r.id, r.label, r.probability, r.impact, r.severity, r.status,
+                  r.mitigation_plan, r.due_date, rp.impact AS project_impact, rp.context AS project_context
+             FROM risks r
+             JOIN risk_projects rp ON rp.risk_id = r.id
+            WHERE rp.project_id = $1
+            ORDER BY
+              CASE r.severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+              r.due_date ASC NULLS LAST`,
           [projectId]
         ),
         query(
@@ -181,10 +187,10 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────────────
 server.tool(
   'list_risks',
-  'List risks across all projects (or filtered by project), useful for cross-project dashboards.',
+  'List risks across all projects (or filtered by project/status/severity). Risks are N-to-N with projects — one risk can affect multiple projects.',
   {
-    project_id_or_slug: z.string().optional(),
-    status: z.enum(['open', 'mitigating', 'closed', 'accepted']).optional(),
+    project_id_or_slug: z.string().optional().describe('Filter risks linked to this project (numeric id or slug)'),
+    status:   z.enum(['open', 'mitigating', 'closed', 'accepted']).optional(),
     severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
   },
   async ({ project_id_or_slug, status, severity }) => {
@@ -192,20 +198,20 @@ server.tool(
       const conds = [];
       const params = [];
       if (project_id_or_slug) {
-        params.push(project_id_or_slug);
-        conds.push(`(p.id::text = $${params.length} OR p.slug = $${params.length})`);
+        const { rows } = await query(
+          `SELECT id FROM projects WHERE id::text = $1 OR slug = $1 LIMIT 1`,
+          [project_id_or_slug]
+        );
+        if (!rows[0]) return err(`Project not found: ${project_id_or_slug}`);
+        params.push(rows[0].id);
+        conds.push(`r.id IN (SELECT risk_id FROM risk_projects WHERE project_id = $${params.length})`);
       }
       if (status)   { params.push(status);   conds.push(`r.status = $${params.length}::risk_status`); }
       if (severity) { params.push(severity); conds.push(`r.severity = $${params.length}::risk_level`); }
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       const { rows } = await query(
-        `SELECT r.id, r.label, r.probability, r.impact, r.severity, r.status,
-                r.due_date, r.mitigation_plan,
-                p.slug AS project_slug, p.title AS project_title,
-                c.last_name AS owner_last_name, c.first_name AS owner_first_name
-           FROM risks r
-           JOIN projects p ON p.id = r.project_id
-           LEFT JOIN contacts c ON c.id = r.owner_contact_id
+        `SELECT *
+           FROM v_risks r
            ${where}
            ORDER BY
              CASE r.severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END,
@@ -666,7 +672,9 @@ server.resource(
 - projects(id, code, title, slug, status, urgency, priority,
            client_organization_id, status_brief, rag_*, highlights, concerns, next_steps, attributes)
 - project_members(id, project_id, contact_id, role[sponsor_wbe|etnic_project_manager|...])
-- risks(id, project_id, label, probability, impact, severity, status, owner_contact_id, mitigation_plan, due_date)
+- risks(id, label, probability, impact, severity, status, owner_contact_id, mitigation_plan, due_date) — N-to-N with projects via risk_projects
+- risk_projects(id, risk_id, project_id, impact, context) — links one risk to multiple projects
+- v_risks VIEW — risks with projects[] aggregated as JSON + owner_name
 - documents(id, project_id, type[mandate|briefing_note|dip|project_sheet|...], version, status, attributes)
 - document_files(id, document_id, storage_path, extracted_text)
 - meetings(id, project_id, title, type, start_at, transformer_transcript_id,
@@ -674,7 +682,7 @@ server.resource(
            raw_transcript, minutes[raw fallback], decisions[raw fallback], actions[raw fallback])
 - meeting_attendees(id, meeting_id, contact_id, status[present|excused|absent|invited], role)
 - meeting_topics(id, meeting_id, position, title, summary, type[information|decision|action|open_point|other])
-- meeting_decisions(id, meeting_id, description, impact, position)
+- meeting_decisions(id, meeting_id, description, impact, position, driver_contact_id, approver_contact_id, is_reversible)
 - meeting_actions(id, meeting_id, owner_id→contacts, owner_raw, description, deadline, status[open|done|cancelled|overdue], notes)
 - v_open_actions VIEW — open actions with owner/meeting/project context
 - timeline_events(id, project_id, label, type, event_date)
