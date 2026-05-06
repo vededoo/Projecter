@@ -35,19 +35,30 @@ exports.list = async (req, res, next) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /sources/:id/content  (texte extrait complet)
+// GET /sources/:id/content?offset=0&limit=40000
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getContent = async (req, res, next) => {
   try {
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit  = Math.min(80000, Math.max(1, parseInt(req.query.limit) || 40000));
     const { rows } = await query(
-      `SELECT id, title, source_type, extraction_status, extraction_error,
-              extracted_text, length(extracted_text) AS total_chars,
-              original_filename, mime_type, created_at
+      `SELECT id, title, source_type, description, extraction_status, extraction_error,
+              original_filename, mime_type, file_size_bytes,
+              length(extracted_text)              AS total_chars,
+              substr(extracted_text, $2::int, $3::int) AS content,
+              created_at, updated_at
          FROM sources WHERE id = $1`,
-      [req.params.id]
+      [req.params.id, offset + 1, limit]
     );
     if (!rows[0]) return res.status(404).json(errorResponse(404, 'Source not found'));
-    res.json(serialize('source', rows[0]));
+    const r = rows[0];
+    const returned_chars = (r.content || '').length;
+    res.json(serialize('source', {
+      ...r,
+      offset,
+      returned_chars,
+      has_more: offset + returned_chars < (r.total_chars || 0),
+    }));
   } catch (e) { next(e); }
 };
 
