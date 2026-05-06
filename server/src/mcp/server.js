@@ -651,6 +651,154 @@ server.tool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
+// Tool: list_project_sources
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'list_project_sources',
+  'List reference documents (sources) linked to a project: PC lists, directives, specs, contracts, etc.',
+  {
+    project_id_or_slug: z.string().describe('Project numeric id or slug'),
+    source_type: z.string().optional().describe('Filter by type (pc_list, directive, spec, ...)'),
+  },
+  async ({ project_id_or_slug, source_type }) => {
+    try {
+      const { rows: pj } = await query(
+        `SELECT id FROM projects WHERE id::text = $1 OR slug = $1 LIMIT 1`,
+        [project_id_or_slug]
+      );
+      if (!pj[0]) return err(`Project not found: ${project_id_or_slug}`);
+      const projectId = pj[0].id;
+      const conds = ['project_id = $1'];
+      const params = [projectId];
+      if (source_type) { params.push(source_type); conds.push(`source_type = $${params.length}`); }
+      const { rows } = await query(
+        `SELECT id, title, source_type, description, extraction_status,
+                length(extracted_text) AS extracted_chars,
+                original_filename, mime_type, file_size_bytes, created_at, updated_at
+           FROM project_sources
+          WHERE ${conds.join(' AND ')}
+          ORDER BY created_at DESC`,
+        params
+      );
+      return ok({ count: rows.length, sources: rows });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: get_source_content
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'get_source_content',
+  'Get the full extracted text of a project source document. Use offset/limit for large documents.',
+  {
+    source_id: z.number().int().describe('project_sources.id'),
+    offset: z.number().int().min(0).default(0).optional().describe('Character offset for pagination'),
+    limit:  z.number().int().min(1).max(80000).default(40000).optional().describe('Max characters to return'),
+  },
+  async ({ source_id, offset = 0, limit = 40000 }) => {
+    try {
+      const { rows } = await query(
+        `SELECT id, title, source_type, description, extraction_status,
+                extraction_error, original_filename, mime_type,
+                length(extracted_text) AS total_chars,
+                substring(extracted_text FROM $2 FOR $3) AS content_chunk,
+                created_at, updated_at
+           FROM project_sources WHERE id = $1`,
+        [source_id, offset + 1, limit]  // substring is 1-based
+      );
+      if (!rows[0]) return err(`Source not found: ${source_id}`);
+      const r = rows[0];
+      return ok({
+        id: r.id, title: r.title, source_type: r.source_type,
+        description: r.description, extraction_status: r.extraction_status,
+        extraction_error: r.extraction_error,
+        original_filename: r.original_filename, mime_type: r.mime_type,
+        total_chars: r.total_chars,
+        offset, returned_chars: (r.content_chunk || '').length,
+        has_more: offset + limit < (r.total_chars || 0),
+        content: r.content_chunk,
+      });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: create_project_source
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'create_project_source',
+  'Save a reference document (source) to a project. Used when the LLM reads a file from chat context and extracts its text. Pass the full extracted text in extracted_text.',
+  {
+    project_id:      z.number().int().describe('projects.id'),
+    title:           z.string().describe('Short descriptive title for this document'),
+    source_type:     z.string().optional().describe('Category: pc_list | directive | spec | contract | template | procedure | other'),
+    description:     z.string().optional().describe('Brief summary of what this document contains and why it is relevant'),
+    extracted_text:  z.string().optional().describe('Full text content extracted from the source document'),
+    original_filename: z.string().optional().describe('Original filename if known (e.g. "liste_pc_migration.xlsx")'),
+    mime_type:       z.string().optional().describe('MIME type if known'),
+  },
+  async ({ project_id, title, source_type, description, extracted_text, original_filename, mime_type }) => {
+    try {
+      const { rows: pj } = await query(
+        `SELECT id FROM projects WHERE id = $1 LIMIT 1`, [project_id]
+      );
+      if (!pj[0]) return err(`Project not found: ${project_id}`);
+      const status = extracted_text ? 'success' : 'pending';
+      const { rows } = await query(
+        `INSERT INTO project_sources
+           (project_id, title, source_type, description, extracted_text,
+            extraction_status, original_filename, mime_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, title, source_type, extraction_status,
+                   length(extracted_text) AS extracted_chars, created_at`,
+        [project_id, title, source_type || null, description || null,
+         extracted_text || null, status, original_filename || null, mime_type || null]
+      );
+      return ok({ created: rows[0] });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: update_project_source
+// ─────────────────────────────────────────────────────────────────────────
+server.tool(
+  'update_project_source',
+  'Update the content or metadata of an existing project source (e.g. after re-reading an updated file).',
+  {
+    source_id:      z.number().int().describe('project_sources.id'),
+    title:          z.string().optional(),
+    source_type:    z.string().optional(),
+    description:    z.string().optional(),
+    extracted_text: z.string().optional().describe('Full updated text content'),
+  },
+  async ({ source_id, title, source_type, description, extracted_text }) => {
+    try {
+      const sets = [];
+      const params = [source_id];
+      if (title          !== undefined) { params.push(title);          sets.push(`title = $${params.length}`); }
+      if (source_type    !== undefined) { params.push(source_type);    sets.push(`source_type = $${params.length}`); }
+      if (description    !== undefined) { params.push(description);    sets.push(`description = $${params.length}`); }
+      if (extracted_text !== undefined) {
+        params.push(extracted_text);
+        sets.push(`extracted_text = $${params.length}`);
+        sets.push(`extraction_status = 'success'`);
+      }
+      if (!sets.length) return err('Nothing to update.');
+      const { rows } = await query(
+        `UPDATE project_sources SET ${sets.join(', ')} WHERE id = $1
+         RETURNING id, title, source_type, extraction_status,
+                   length(extracted_text) AS extracted_chars, updated_at`,
+        params
+      );
+      if (!rows[0]) return err(`Source not found: ${source_id}`);
+      return ok({ updated: rows[0] });
+    } catch (e) { return err(e.message); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────
 // Resources: org snapshot + project list as readable resources
 // ─────────────────────────────────────────────────────────────────────────
 server.resource(
@@ -686,6 +834,10 @@ server.resource(
 - meeting_actions(id, meeting_id, owner_id→contacts, owner_raw, description, deadline, status[open|done|cancelled|overdue], notes)
 - v_open_actions VIEW — open actions with owner/meeting/project context
 - timeline_events(id, project_id, label, type, event_date)
+- project_sources(id, project_id, title, source_type, description, extracted_text,
+                  extraction_status[pending|success|failed|skipped], extraction_error,
+                  storage_path, original_filename, mime_type, file_size_bytes,
+                  uploaded_by_contact_id, created_at, updated_at)
 
 Full DDL: database/migrations/001_init_schema.sql
 `;
