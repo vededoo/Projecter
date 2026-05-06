@@ -1,11 +1,37 @@
 'use strict';
-const router = require('express').Router();
+const router  = require('express').Router();
+const multer  = require('multer');
 const projects = require('../controllers/projectsController');
 const contacts = require('../controllers/contactsController');
-const risks = require('../controllers/risksController');
-const members = require('../controllers/projectMembersController');
+const risks    = require('../controllers/risksController');
+const members  = require('../controllers/projectMembersController');
 const documents = require('../controllers/documentsController');
-const meetings = require('../controllers/meetingsController');
+const meetings  = require('../controllers/meetingsController');
+const sources   = require('../controllers/sourcesController');
+
+// Multer en mémoire — 20 Mo max
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',         // .xlsx
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+      'application/vnd.ms-excel',          // .xls
+      'application/msword',                // .doc (fallback)
+      'application/pdf',
+      'text/plain',
+      'text/csv',
+      'application/octet-stream',          // fallback générique
+    ];
+    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(docx|xlsx|xls|pdf|txt|csv|pptx)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Format non supporté : ${file.mimetype}`));
+    }
+  },
+});
 
 router.get('/health', (_req, res) => res.json({
   data: { type: 'health', attributes: { status: 'ok', ts: new Date().toISOString() } }
@@ -54,5 +80,12 @@ router.patch('/meetings/:id', meetings.update);
 router.delete('/meetings/:id', meetings.remove);
 router.post('/meetings/:id/attendees', meetings.addAttendee);
 router.delete('/meetings/:id/attendees/:contactId', meetings.removeAttendee);
+
+// Project sources
+router.get('/projects/:projectId/sources', sources.list);
+router.post('/projects/:projectId/sources/upload', upload.single('file'), sources.upload);
+router.get('/project-sources/:id/content', sources.getContent);
+router.patch('/project-sources/:id', sources.update);
+router.delete('/project-sources/:id', sources.remove);
 
 module.exports = router;
