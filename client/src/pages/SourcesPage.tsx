@@ -154,7 +154,7 @@ export function SourcesPage() {
         >
           <option value="">All projects</option>
           {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.attributes.code} — {p.attributes.title}</option>
+            <option key={p.id} value={p.id}>{p.attributes.code || p.attributes.title}</option>
           ))}
         </select>
         <button
@@ -210,12 +210,12 @@ export function SourcesPage() {
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>DESCRIPTION</label>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>DESCRIPTION <span style={{ fontWeight: 400, opacity: 0.6 }}>(auto-generated from content if left blank)</span></label>
               <textarea
                 value={uploadDesc}
                 onChange={e => setUploadDesc(e.target.value)}
                 rows={2}
-                placeholder="What does this document contain? Key columns, scope..."
+                placeholder="Leave blank to auto-generate from document content…"
                 style={{ width: '100%', background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', borderRadius: 4, resize: 'vertical', fontFamily: 'inherit' }}
               />
             </div>
@@ -229,7 +229,7 @@ export function SourcesPage() {
                       checked={uploadProjects.includes(p.id)}
                       onChange={() => toggleProject(p.id)}
                     />
-                    <span>{p.attributes.code}</span>
+                    <span>{p.attributes.code || p.attributes.title}</span>
                   </label>
                 ))}
                 {!projects.length && <span className="muted">No projects available</span>}
@@ -280,7 +280,7 @@ export function SourcesPage() {
                       {s.projects?.length
                         ? s.projects.map(p => (
                             <span key={p.project_id} className="badge" title={p.project_title}>
-                              {p.project_code}
+                              {p.project_code || p.project_title}
                             </span>
                           ))
                         : <span className="muted" style={{ fontSize: 11 }}>unlinked</span>
@@ -335,7 +335,7 @@ export function SourcesPage() {
                                         border: `1px solid ${linked ? 'var(--accent)' : 'var(--border)'}`,
                                       }}
                                     >
-                                      {linked ? '✓ ' : '+ '}{p.attributes.code}
+                                      {linked ? '✓ ' : '+ '}{p.attributes.code || p.attributes.title}
                                     </button>
                                   );
                                 })}

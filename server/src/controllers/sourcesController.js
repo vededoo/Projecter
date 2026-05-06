@@ -89,6 +89,13 @@ exports.upload = async (req, res, next) => {
     logger.info(`📥 Parsing source: ${originalname} (${size} bytes)`);
     const { text, status: extractionStatus, error: extractionError } = await parseDocument(buffer, originalname);
 
+    // Auto-description depuis le texte extrait si absente
+    let autoDescription = description;
+    if (!autoDescription && text && text.trim()) {
+      const firstBlock = text.trim().split(/\n{2,}/)[0].replace(/\s+/g, ' ').trim();
+      autoDescription = firstBlock.length > 280 ? firstBlock.slice(0, 277) + '…' : firstBlock;
+    }
+
     // Stocker le fichier original
     fs.mkdirSync(STORAGE_BASE, { recursive: true });
     const ext      = path.extname(originalname);
@@ -105,7 +112,7 @@ exports.upload = async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id, title, source_type, extraction_status,
                  length(extracted_text) AS extracted_chars, created_at`,
-      [title, source_type, description,
+      [title, source_type, autoDescription,
        text || null, extractionStatus, extractionError || null,
        storagePath, originalname, mimetype, size]
     );
