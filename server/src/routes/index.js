@@ -59,6 +59,8 @@ router.get('/risks/:id', risks.get);
 router.post('/risks', risks.create);
 router.patch('/risks/:id', risks.update);
 router.delete('/risks/:id', risks.remove);
+router.post('/risks/:id/projects/:projectId', risks.linkProject);
+router.delete('/risks/:id/projects/:projectId', risks.unlinkProject);
 
 // Project members
 router.get('/project-members', members.list);

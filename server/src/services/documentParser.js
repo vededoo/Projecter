@@ -15,7 +15,7 @@
 
 const mammoth  = require('mammoth');
 const XLSX     = require('xlsx');
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse'); // v2 : classe, pas une fonction directe
 const path     = require('path');
 
 const MAX_CHARS = 200_000; // limite raisonnable pour éviter les blobs monstres
@@ -51,7 +51,13 @@ async function parseDocument(buffer, filename) {
 
     // ── .pdf ───────────────────────────────────────────────────────────────
     if (ext === '.pdf') {
-      const data = await pdfParse(buffer);
+      const parser = new PDFParse({ data: buffer });
+      let data;
+      try {
+        data = await parser.getText();
+      } finally {
+        await parser.destroy();
+      }
       const text = (data.text || '').trim().slice(0, MAX_CHARS);
       if (!text) {
         return { text: null, status: 'skipped', error: 'PDF vide ou scanné (pas de texte sélectionnable)' };

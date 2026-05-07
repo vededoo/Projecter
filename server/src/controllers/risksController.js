@@ -125,3 +125,35 @@ exports.remove = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+exports.linkProject = async (req, res, next) => {
+  try {
+    const { id, projectId } = req.params;
+    const { impact, context } = req.body?.data?.attributes || {};
+    await query(
+      `INSERT INTO risk_projects (risk_id, project_id, impact, context)
+       VALUES ($1, $2, $3::risk_level, $4)
+       ON CONFLICT (risk_id, project_id) DO UPDATE
+         SET impact = EXCLUDED.impact, context = EXCLUDED.context`,
+      [id, projectId, impact || null, context || null]
+    );
+    const { rows } = await query(
+      `SELECT ${VIEW_COLS} FROM v_risks v JOIN risks r ON r.id = v.id WHERE v.id = $1`,
+      [id]
+    );
+    logger.info('✅ Risk linked to project', { riskId: id, projectId });
+    res.json(serialize('risk', rows[0]));
+  } catch (e) { next(e); }
+};
+
+exports.unlinkProject = async (req, res, next) => {
+  try {
+    const { id, projectId } = req.params;
+    await query(
+      `DELETE FROM risk_projects WHERE risk_id = $1 AND project_id = $2`,
+      [id, projectId]
+    );
+    logger.info('✅ Risk unlinked from project', { riskId: id, projectId });
+    res.status(204).end();
+  } catch (e) { next(e); }
+};
+
