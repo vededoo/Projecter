@@ -203,6 +203,34 @@ exports.linkProject = async (req, res, next) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /sources/:id/file  — serve le fichier original
+// ─────────────────────────────────────────────────────────────────────────────
+exports.serveFile = async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT storage_path, original_filename, mime_type FROM sources WHERE id = $1`,
+      [req.params.id]
+    );
+    if (!rows[0] || !rows[0].storage_path) {
+      return res.status(404).json(errorResponse(404, 'Source not found or no file stored'));
+    }
+    const { storage_path, original_filename, mime_type } = rows[0];
+    const filePath = path.join(path.resolve(__dirname, '../../storage'), storage_path);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json(errorResponse(404, 'File not found on disk'));
+    }
+    const isPdf = (mime_type || '').includes('pdf');
+    res.setHeader('Content-Type', mime_type || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `${isPdf ? 'inline' : 'attachment'}; filename="${encodeURIComponent(original_filename || 'file')}"`
+    );
+    fs.createReadStream(filePath).pipe(res);
+    logger.info(`📄 Source file served: ${req.params.id}`);
+  } catch (e) { next(e); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DELETE /sources/:id/projects/:projectId  — délier une source d'un projet
 // ─────────────────────────────────────────────────────────────────────────────
 exports.unlinkProject = async (req, res, next) => {

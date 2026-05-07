@@ -72,6 +72,11 @@ export function SourcesPage() {
   const [detailOffset, setDetailOffset]   = useState(0);
   const [linkingId, setLinkingId]         = useState<string | null>(null); // source id being edited
 
+  // Delete + preview state
+  const [deleteId, setDeleteId]   = useState<string | null>(null); // id en attente de confirm
+  const [deleting, setDeleting]   = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null); // URL pour la modale PDF
+
   const load = () => {
     const qs = filterProject ? `?project_id=${filterProject}` : '';
     Promise.all([
@@ -142,6 +147,34 @@ export function SourcesPage() {
 
   const toggleProject = (id: string) =>
     setUploadProjects(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const openPreview = (s: Source, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const isPdf = (s.mime_type || '').includes('pdf');
+    if (isPdf) {
+      setPreviewUrl(`${BASE}/sources/${s.id}/file`);
+    } else {
+      // Fichiers Office/autres : téléchargement direct → l'OS ouvre l'app locale
+      const a = document.createElement('a');
+      a.href = `${BASE}/sources/${s.id}/file`;
+      a.download = s.original_filename || s.title;
+      a.click();
+    }
+  };
+
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (deleteId !== id) { setDeleteId(id); return; } // 1er clic : demande confirm
+    setDeleting(true);
+    try {
+      const res = await fetch(`${BASE}/sources/${id}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) throw new Error(`Delete failed: ${res.status}`);
+      setDeleteId(null);
+      if (detail?.id === id) setDetail(null);
+      load();
+    } catch (err: any) { setError(err.message); }
+    finally { setDeleting(false); }
+  };
 
   return (
     <div>
@@ -254,7 +287,7 @@ export function SourcesPage() {
         <table>
           <thead><tr>
             <th>Title</th><th>Type</th><th>Description</th>
-            <th>Projects</th><th>Extraction</th><th>Size</th><th>Date</th>
+            <th>Projects</th><th>Extraction</th><th>Size</th><th>Date</th><th></th>
           </tr></thead>
           <tbody>
             {sources.map(s => (
@@ -300,12 +333,38 @@ export function SourcesPage() {
                   </td>
                   <td className="muted">{fmtSize(s.file_size_bytes)}</td>
                   <td className="muted">{new Date(s.created_at).toLocaleDateString('fr-BE')}</td>
+                  <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                    <button
+                      title="Preview / Download"
+                      onClick={e => openPreview(s, e)}
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12, cursor: 'pointer', color: 'var(--text)', marginRight: 4 }}
+                    >👁</button>
+                    {deleteId === s.id ? (
+                      <>
+                        <button
+                          onClick={e => handleDelete(s.id, e)}
+                          disabled={deleting}
+                          style={{ background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 12, cursor: 'pointer', marginRight: 3 }}
+                        >{deleting ? '…' : 'Confirm'}</button>
+                        <button
+                          onClick={e => { e.stopPropagation(); setDeleteId(null); }}
+                          style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12, cursor: 'pointer', color: 'var(--muted)' }}
+                        >Cancel</button>
+                      </>
+                    ) : (
+                      <button
+                        title="Delete source"
+                        onClick={e => handleDelete(s.id, e)}
+                        style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12, cursor: 'pointer', color: 'var(--red)' }}
+                      >✕</button>
+                    )}
+                  </td>
                 </tr>
 
                 {/* ── Detail panel ─────────────────────────────────── */}
                 {detail?.id === s.id && (
                   <tr>
-                    <td colSpan={7} style={{ background: 'var(--panel-2)', padding: 0 }}>
+                    <td colSpan={8} style={{ background: 'var(--panel-2)', padding: 0 }}>
                       <div style={{ padding: '16px 20px' }}>
                         {detailLoading && <div className="muted">Loading…</div>}
                         {!detailLoading && detail && (
@@ -401,6 +460,30 @@ export function SourcesPage() {
         </table>
         {!sources.length && <div className="empty" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No sources yet. Upload your first document.</div>}
       </div>
+
+      {/* ── PDF Preview modal ──────────────────────────────────── */}
+      {previewUrl && (
+        <div
+          onClick={() => setPreviewUrl(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
+            zIndex: 1000, display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 16px' }}>
+            <button
+              onClick={() => setPreviewUrl(null)}
+              style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', lineHeight: 1 }}
+            >✕</button>
+          </div>
+          <iframe
+            src={previewUrl}
+            title="Source preview"
+            onClick={e => e.stopPropagation()}
+            style={{ flex: 1, border: 'none', margin: '0 16px 16px' }}
+          />
+        </div>
+      )}
     </div>
   );
 }

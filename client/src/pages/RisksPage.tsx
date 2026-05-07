@@ -93,25 +93,20 @@ export function RisksPage() {
     if (!form.label.trim()) return;
     setSaving(true);
     try {
-      const payload = {
-        data: {
-          type: 'risk',
-          attributes: {
-            label: form.label.trim(),
-            description: form.description || null,
-            probability: form.probability || null,
-            impact: form.impact || null,
-            severity: form.severity || null,
-            status: form.status || 'open',
-            mitigation_plan: form.mitigation_plan || null,
-            due_date: form.due_date || null,
-          },
-        },
+      const attributes = {
+        label: form.label.trim(),
+        description: form.description || null,
+        probability: form.probability || null,
+        impact: form.impact || null,
+        severity: form.severity || null,
+        status: form.status || 'open',
+        mitigation_plan: form.mitigation_plan || null,
+        due_date: form.due_date || null,
       };
       if (editItem) {
-        await api.patch(`/risks/${editItem.id}`, payload);
+        await api.patch(`/risks/${editItem.id}`, attributes, 'risk');
       } else {
-        await api.post('/risks', payload);
+        await api.post('/risks', attributes, 'risk');
       }
       setModalOpen(false);
       reload();
@@ -127,7 +122,7 @@ export function RisksPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await api.delete(`/risks/${deleteTarget.id}`);
+      await api.del(`/risks/${deleteTarget.id}`);
       setDeleteTarget(null);
       reload();
     } catch (e: any) {
@@ -148,8 +143,9 @@ export function RisksPage() {
     setLinking(true);
     try {
       await api.post(`/risks/${linkTarget.id}/projects/${linkProjectId}`, {
-        data: { type: 'risk-project', attributes: { impact: linkImpact || null, context: linkContext || null } },
-      });
+        impact: linkImpact || null,
+        context: linkContext || null,
+      }, 'risk-project');
       reload();
       // Refresh linkTarget from updated list
       setLinkTarget(prev => {
@@ -166,7 +162,7 @@ export function RisksPage() {
 
   const handleUnlink = async (riskId: string, projectId: number) => {
     try {
-      await api.delete(`/risks/${riskId}/projects/${projectId}`);
+      await api.del(`/risks/${riskId}/projects/${projectId}`);
       reload();
     } catch (e: any) {
       setError(e.response?.data?.errors?.[0]?.detail || e.message);

@@ -92,6 +92,7 @@ router.get('/transformer/texts/:id', transformer.getText);
 router.get('/sources', sources.list);
 router.post('/sources/upload', upload.single('file'), sources.upload);
 router.get('/sources/:id/content', sources.getContent);
+router.get('/sources/:id/file', sources.serveFile);
 router.patch('/sources/:id', sources.update);
 router.delete('/sources/:id', sources.remove);
 router.post('/sources/:id/projects/:projectId', sources.linkProject);
