@@ -7,11 +7,20 @@ const COLS = `pm.id, pm.project_id, pm.contact_id, pm.role, pm.cc_id, pm.role_id
               pm.effort_md, pm.to_be_hired, pm.comments, pm.display_order, pm.created_at,
               c.last_name, c.first_name, c.email, c.job_title,
               o.code AS organization_code,
-              cc.code AS cc_code, cc.label AS cc_label`;
+              COALESCE(cc.code,   cc_prim.code)  AS cc_code,
+              COALESCE(cc.label,  cc_prim.label) AS cc_label`;
 
+// cc_prim = CC primaire du contact (memberships.is_primary=true, ended_at IS NULL)
+// utilisé en fallback quand pm.cc_id n'est pas renseigné
 const JOINS = `LEFT JOIN contacts c ON c.id = pm.contact_id
                LEFT JOIN organizations o ON o.id = c.organization_id
-               LEFT JOIN competency_centers cc ON cc.id = pm.cc_id`;
+               LEFT JOIN competency_centers cc ON cc.id = pm.cc_id
+               LEFT JOIN LATERAL (
+                 SELECT cc_id FROM memberships
+                 WHERE contact_id = pm.contact_id AND is_primary = true AND ended_at IS NULL
+                 ORDER BY id LIMIT 1
+               ) mb_prim ON true
+               LEFT JOIN competency_centers cc_prim ON cc_prim.id = mb_prim.cc_id`;
 
 exports.list = async (req, res, next) => {
   try {
@@ -35,11 +44,21 @@ exports.create = async (req, res, next) => {
     if (!a.project_id || !a.contact_id || !a.role) {
       return res.status(400).json(errorResponse(400, 'project_id, contact_id and role are required'));
     }
+    // Auto-fill cc_id depuis la CC primaire du contact si non fourni
+    let ccId = a.cc_id || null;
+    if (!ccId) {
+      const { rows: mbRows } = await query(
+        `SELECT cc_id FROM memberships WHERE contact_id = $1 AND is_primary = true AND ended_at IS NULL LIMIT 1`,
+        [a.contact_id]
+      );
+      if (mbRows.length) ccId = mbRows[0].cc_id;
+    }
+
     const { rows: ins } = await query(
       `INSERT INTO project_members (project_id, contact_id, role, cc_id, role_id, effort_md, to_be_hired, comments, display_order)
        VALUES ($1, $2, $3::project_role, $4, $5, $6, COALESCE($7, FALSE), $8, COALESCE($9, 0))
        RETURNING id`,
-      [a.project_id, a.contact_id, a.role, a.cc_id || null, a.role_id || null,
+      [a.project_id, a.contact_id, a.role, ccId, a.role_id || null,
        a.effort_md || null, a.to_be_hired, a.comments || null, a.display_order]
     );
     const { rows } = await query(
