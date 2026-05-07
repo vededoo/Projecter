@@ -79,7 +79,7 @@ export function SourcesPage() {
       fetch(`${BASE}/projects`).then(r => r.json()) as Promise<JsonApiList<{ title: string; code: string }>>,
     ])
       .then(([s, p]) => {
-        setSources(s.data.map(d => ({ id: d.id, ...d.attributes })));
+        setSources(s.data.map(d => ({ ...d.attributes, id: d.id })));
         setProjects(p.data as Project[]);
       })
       .catch(e => setError(e.message));
@@ -92,7 +92,7 @@ export function SourcesPage() {
     fetch(`${BASE}/sources/${sourceId}/content?offset=${offset}&limit=${CHUNK}`)
       .then(r => r.json())
       .then((json: JsonApiOne<SourceDetail>) => {
-        setDetail({ id: sourceId, ...json.data.attributes });
+        setDetail({ ...json.data.attributes, id: sourceId });
         setDetailOffset(offset);
       })
       .catch(e => setError(e.message))
