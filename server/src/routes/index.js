@@ -72,6 +72,8 @@ router.delete('/project-members/:id', members.remove);
 // Documents
 router.get('/documents', documents.list);
 router.get('/documents/:id', documents.get);
+router.get('/documents/:id/file', documents.serveFile);
+router.post('/documents/generate', documents.generate);
 router.post('/documents', documents.create);
 router.patch('/documents/:id', documents.update);
 router.delete('/documents/:id', documents.remove);

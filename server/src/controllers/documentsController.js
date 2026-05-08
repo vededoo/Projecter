@@ -2,10 +2,13 @@
 const { query } = require('../utils/db');
 const { serialize, parseAttributes, errorResponse } = require('../utils/jsonapi');
 const logger = require('../utils/logger');
+const generator = require('../services/documentGeneratorService');
+const fileManager = require('../utils/localFileManager');
 
 const COLS = `id, project_id, type, title, version, status, drafted_at,
               etnic_approved_at, wbe_approved_at, signed_at, author_contact_id,
               attributes, generated_from_template, parent_document_id,
+              template_id, template_vars, generated_file_path, meeting_id,
               created_at, updated_at`;
 
 const FIELDS = ['type', 'title', 'version', 'status', 'drafted_at',
@@ -89,4 +92,114 @@ exports.remove = async (req, res, next) => {
     if (!rowCount) return res.status(404).json(errorResponse(404, 'Document not found'));
     res.status(204).end();
   } catch (e) { next(e); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /documents/:id/file   — téléchargement du .docx généré
+// ─────────────────────────────────────────────────────────────────────────────
+exports.serveFile = async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      'SELECT title, generated_file_path FROM documents WHERE id = $1',
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json(errorResponse(404, 'Document not found'));
+    const { generated_file_path, title } = rows[0];
+    if (!generated_file_path) {
+      return res.status(404).json(errorResponse(404, 'No generated file for this document'));
+    }
+    const fullPath = fileManager.resolvePath('documents', generated_file_path);
+    if (!fileManager.exists(fullPath)) {
+      return res.status(404).json(errorResponse(404, 'File not found on disk'));
+    }
+    const safeTitle = (title || 'document').replace(/[^a-z0-9_\-\s]/gi, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeTitle)}.docx"`);
+    fileManager.createReadStream(fullPath).pipe(res);
+  } catch (e) { next(e); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /documents/generate
+// Body JSON:API : { template_id, project_id, [meeting_id], [overrides: {}] }
+// ─────────────────────────────────────────────────────────────────────────────
+exports.generate = async (req, res, next) => {
+  try {
+    const { template_id, project_id, meeting_id = null, overrides = {} } = parseAttributes(req);
+    if (!template_id || !project_id) {
+      return res.status(422).json(errorResponse(422, 'template_id and project_id are required'));
+    }
+
+    // Charger le template
+    const { rows: tRows } = await query(
+      'SELECT * FROM document_templates WHERE id = $1 AND active = true',
+      [template_id]
+    );
+    if (!tRows[0]) return res.status(404).json(errorResponse(404, 'Template not found or inactive'));
+    const template = tRows[0];
+
+    // Charger le projet pour les variables automatiques
+    const { rows: pRows } = await query(
+      `SELECT p.id, p.title, p.status, p.status_brief,
+              p.requesting_service, p.portfolio,
+              c.display_name AS pm_name
+       FROM projects p
+       LEFT JOIN contacts c ON c.id = (
+         SELECT pm.contact_id FROM project_members pm
+         WHERE pm.project_id = p.id
+           AND pm.role IN ('etnic_project_manager','business_project_manager')
+         LIMIT 1
+       )
+       WHERE p.id = $1`,
+      [project_id]
+    );
+    if (!pRows[0]) return res.status(404).json(errorResponse(404, 'Project not found'));
+    const project = pRows[0];
+
+    // Construire la map de variables
+    const now    = new Date();
+    const dateStr = now.toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const vars = {
+      project_title:       project.title            || '',
+      project_status:      project.status           || '',
+      project_description: project.status_brief     || '',
+      requesting_service:  project.requesting_service || '',
+      portfolio:           project.portfolio         || '',
+      pm_name:             project.pm_name           || '',
+      date:                dateStr,
+      year:                String(now.getFullYear()),
+      ...overrides,
+    };
+
+    // Générer le fichier
+    const outputFilename = `${Date.now()}_${template.file_path}`;
+    await generator.generate(template.file_path, vars, outputFilename);
+
+    // Créer l'entrée dans documents
+    const { rows: dRows } = await query(
+      `INSERT INTO documents
+         (project_id, type, title, status, template_id, template_vars, generated_file_path, meeting_id, generated_from_template)
+       VALUES ($1, $2::document_type, $3, 'draft'::document_status, $4, $5, $6, $7, true)
+       RETURNING ${COLS}`,
+      [
+        project_id,
+        template.doc_type,
+        `${template.name} — ${project.title}`,
+        template_id,
+        JSON.stringify(vars),
+        outputFilename,
+        meeting_id,
+      ]
+    );
+
+    logger.info(`✅ [documents] Généré id=${dRows[0].id} → ${outputFilename}`);
+    res.status(201).json(serialize('document', dRows[0]));
+  } catch (err) {
+    // Erreur docxtemplater — extraire le message propre
+    if (err.properties && err.properties.errors) {
+      const details = err.properties.errors.map(e => e.message).join(', ');
+      return res.status(422).json(errorResponse(422, `Template error: ${details}`));
+    }
+    next(err);
+  }
 };
