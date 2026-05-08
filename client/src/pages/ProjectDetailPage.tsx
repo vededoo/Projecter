@@ -27,7 +27,12 @@ interface Risk {
   severity: string | null; status: string; due_date: string | null;
 }
 interface Doc {
-  type: string; title: string | null; version: string; status: string;
+  id: string; type: string; title: string | null; version: string;
+  status: string; generated_from_template: boolean;
+  generated_file_path: string | null;
+}
+interface DocTemplate {
+  id: string; name: string; doc_type: string; description: string | null;
 }
 interface Meeting {
   title: string; type: string; start_at: string;
@@ -60,8 +65,14 @@ export function ProjectDetailPage({ id, onBack }: { id: string; onBack: () => vo
   const [risks, setRisks]       = useState<Risk[]>([]);
   const [docs, setDocs]         = useState<Doc[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [sources, setSources]   = useState<SourceItem[]>([]);
-  const [error, setError]       = useState<string | null>(null);
+  const [sources, setSources]     = useState<SourceItem[]>([]);
+  const [templates, setTemplates] = useState<DocTemplate[]>([]);
+  const [error, setError]         = useState<string | null>(null);
+
+  // Generate document
+  const [showGenerate, setShowGenerate]   = useState(false);
+  const [genTemplateId, setGenTemplateId] = useState('');
+  const [generating, setGenerating]       = useState(false);
 
   // Add member form
   const [showAddMember, setShowAddMember]   = useState(false);
@@ -82,6 +93,10 @@ export function ProjectDetailPage({ id, onBack }: { id: string; onBack: () => vo
     api.get<JsonApiList<SourceItem>>(`/sources?project_id=${id}`)
       .then(s => setSources(s.data.map(x => ({ ...x.attributes, id: x.id }))));
 
+  const loadDocs = () =>
+    api.get<JsonApiList<Doc>>(`/documents?project_id=${id}`)
+      .then(d => setDocs(d.data.map(x => ({ ...x.attributes, id: x.id }))));
+
   useEffect(() => {
     Promise.all([
       api.get<JsonApiOne<Project>>(`/projects/${id}`),
@@ -90,17 +105,35 @@ export function ProjectDetailPage({ id, onBack }: { id: string; onBack: () => vo
       api.get<JsonApiList<Doc>>(`/documents?project_id=${id}`),
       api.get<JsonApiList<Meeting>>(`/meetings?project_id=${id}`),
       api.get<JsonApiList<SourceItem>>(`/sources?project_id=${id}`),
+      api.get<JsonApiList<DocTemplate>>(`/document-templates`),
     ])
-      .then(([p, m, r, d, mt, s]) => {
+      .then(([p, m, r, d, mt, s, tmpl]) => {
         setProject(p.data.attributes);
         setMembers(m.data.map(x => ({ ...x.attributes, id: x.id })));
         setRisks(r.data.map(x => x.attributes));
-        setDocs(d.data.map(x => x.attributes));
+        setDocs(d.data.map(x => ({ ...x.attributes, id: x.id })));
         setMeetings(mt.data.map(x => x.attributes));
         setSources(s.data.map(x => ({ ...x.attributes, id: x.id })));
+        setTemplates(tmpl.data.map(x => ({ ...x.attributes, id: x.id })));
       })
       .catch(e => setError(e.message));
   }, [id]); // eslint-disable-line
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!genTemplateId) return;
+    setGenerating(true);
+    try {
+      await api.post('/documents/generate', {
+        template_id: Number(genTemplateId),
+        project_id: Number(id),
+      }, 'documents');
+      setShowGenerate(false);
+      setGenTemplateId('');
+      await loadDocs();
+    } catch (err: any) { setError(err.message); }
+    finally { setGenerating(false); }
+  };
 
   // ── Contact search (debounced) ─────────────────────────────────────────────
   const handleMemberSearch = (q: string) => {
@@ -380,16 +413,62 @@ export function ProjectDetailPage({ id, onBack }: { id: string; onBack: () => vo
       <div className="row">
         <div className="col">
           <div className="card">
-            <h3>Documents ({docs.length})</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Documents ({docs.length})</h3>
+              {templates.length > 0 && (
+                <button
+                  onClick={() => setShowGenerate(v => !v)}
+                  style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}
+                >{showGenerate ? 'Cancel' : '+ Generate'}</button>
+              )}
+            </div>
+
+            {/* Generate form */}
+            {showGenerate && (
+              <form onSubmit={handleGenerate} style={{ background: 'var(--panel-2)', borderRadius: 6, padding: '10px 14px', marginBottom: 14, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>TEMPLATE *</label>
+                  <select
+                    value={genTemplateId}
+                    onChange={e => setGenTemplateId(e.target.value)}
+                    required
+                    style={{ ...INP, width: '100%' }}
+                  >
+                    <option value="">— select template —</option>
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} · {t.doc_type}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={generating || !genTemplateId}
+                  style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', opacity: !genTemplateId ? 0.5 : 1, whiteSpace: 'nowrap' }}
+                >{generating ? 'Generating…' : '⚡ Generate'}</button>
+              </form>
+            )}
+
             {docs.length ? (
               <table>
-                <thead><tr><th>Type</th><th>Title</th><th>Version</th><th>Status</th></tr></thead>
+                <thead><tr><th>Type</th><th>Title</th><th>Version</th><th>Status</th><th></th></tr></thead>
                 <tbody>{docs.map((d, i) => (
                   <tr key={i}>
                     <td><span className="badge">{d.type}</span></td>
-                    <td>{d.title || <span className="muted">—</span>}</td>
+                    <td>
+                      {d.title || <span className="muted">—</span>}
+                      {d.generated_from_template && <span className="muted" style={{ fontSize: 10, marginLeft: 6 }}>⚡ generated</span>}
+                    </td>
                     <td>{d.version}</td>
                     <td>{d.status}</td>
+                    <td>
+                      {d.generated_file_path && (
+                        <a
+                          href={`${BASE}/documents/${d.id}/file`}
+                          title="Download .docx"
+                          style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12, cursor: 'pointer', color: 'var(--text)', textDecoration: 'none' }}
+                        >⬇</a>
+                      )}
+                    </td>
                   </tr>
                 ))}</tbody>
               </table>
