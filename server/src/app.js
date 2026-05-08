@@ -4,6 +4,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const logger = require('./utils/logger');
+const fileManager = require('./utils/fileManager');
 const routes = require('./routes');
 const { errorResponse } = require('./utils/jsonapi');
 
@@ -28,4 +29,7 @@ app.use((err, _req, res, _next) => {
   res.status(500).json(errorResponse(500, 'Internal server error', err.message));
 });
 
-app.listen(PORT, () => logger.info(`🚀 Projecter server listening on :${PORT}`));
+app.listen(PORT, async () => {
+  await fileManager.ensureDirectories();
+  logger.info(`🚀 Projecter server listening on :${PORT}`);
+});

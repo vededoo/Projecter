@@ -1,12 +1,10 @@
 'use strict';
-const path = require('path');
-const fs   = require('fs');
-const { query } = require('../utils/db');
+const path        = require('path');
+const { query }   = require('../utils/db');
 const { serialize, parseAttributes, errorResponse } = require('../utils/jsonapi');
-const logger = require('../utils/logger');
+const logger      = require('../utils/logger');
+const fileManager = require('../utils/fileManager');
 const { parseDocument } = require('../services/documentParser');
-
-const STORAGE_BASE = path.resolve(__dirname, '../../storage/sources');
 
 const VIEW_COLS = `id, title, source_type, description,
                    extraction_status, extraction_error, extracted_chars,
@@ -107,12 +105,12 @@ exports.upload = async (req, res, next) => {
       autoDescription = firstBlock.length > 280 ? firstBlock.slice(0, 277) + '…' : firstBlock;
     }
 
-    // Stocker le fichier original
-    fs.mkdirSync(STORAGE_BASE, { recursive: true });
+    // Stocker le fichier original via fileManager (dirkey 'sources')
     const ext      = path.extname(originalname);
     const filename = `${Date.now()}${ext}`;
-    fs.writeFileSync(path.join(STORAGE_BASE, filename), buffer);
-    const storagePath = `sources/${filename}`;
+    const fullPath = fileManager.resolvePath('sources', filename);
+    await fileManager.writeFile(fullPath, buffer, null);
+    const storagePath = filename; // chemin relatif au dossier sources
 
     // Insérer la source
     const { rows } = await query(
@@ -176,8 +174,8 @@ exports.remove = async (req, res, next) => {
     );
     if (!rows[0]) return res.status(404).json(errorResponse(404, 'Source not found'));
     if (rows[0].storage_path) {
-      const full = path.join(path.resolve(__dirname, '../../storage'), rows[0].storage_path);
-      fs.unlink(full, () => {});
+      const full = fileManager.resolvePath('sources', rows[0].storage_path);
+      await fileManager.deleteFile(full);
     }
     logger.info(`🗑️  Source deleted: ${rows[0].id}`);
     res.status(204).end();
@@ -215,8 +213,8 @@ exports.serveFile = async (req, res, next) => {
       return res.status(404).json(errorResponse(404, 'Source not found or no file stored'));
     }
     const { storage_path, original_filename, mime_type } = rows[0];
-    const filePath = path.join(path.resolve(__dirname, '../../storage'), storage_path);
-    if (!fs.existsSync(filePath)) {
+    const filePath = fileManager.resolvePath('sources', storage_path);
+    if (!(await fileManager.exists(filePath))) {
       return res.status(404).json(errorResponse(404, 'File not found on disk'));
     }
     const isPdf = (mime_type || '').includes('pdf');
@@ -225,7 +223,7 @@ exports.serveFile = async (req, res, next) => {
       'Content-Disposition',
       `${isPdf ? 'inline' : 'attachment'}; filename="${encodeURIComponent(original_filename || 'file')}"`
     );
-    fs.createReadStream(filePath).pipe(res);
+    fileManager.createReadStream(filePath).pipe(res);
     logger.info(`📄 Source file served: ${req.params.id}`);
   } catch (e) { next(e); }
 };
