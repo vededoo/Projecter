@@ -15,8 +15,11 @@
  * @version 1.0.0
  */
 
-// En PRD, deploy.sh remplace Services_dev → Services_prd
-const FileManagerCore = require('../../../../Services/Services_dev/_shared/utils/FileManagerCore');
+const path = require('path');
+const _servicesEnv = process.env.NODE_ENV === 'production' ? 'Services_prd' : 'Services_dev';
+const FileManagerCore = require(
+  path.join('/Users/ldurpel/Development/Projects/Services', _servicesEnv, '_shared/utils/FileManagerCore')
+);
 const { baseDirPaths } = require('../config/config');
 const logger = require('./logger');
 
