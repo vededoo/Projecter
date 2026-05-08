@@ -4,7 +4,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const logger = require('./utils/logger');
-const fileManager = require('./utils/fileManager');
+const fileManager = require('./utils/localFileManager');
 const routes = require('./routes');
 const { errorResponse } = require('./utils/jsonapi');
 

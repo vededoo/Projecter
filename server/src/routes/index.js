@@ -9,6 +9,7 @@ const documents = require('../controllers/documentsController');
 const meetings  = require('../controllers/meetingsController');
 const sources   = require('../controllers/sourcesController');
 const transformer = require('../controllers/transformerController');
+const docTemplates = require('../controllers/documentTemplatesController');
 
 // Multer en mémoire — 20 Mo max
 const upload = multer({
@@ -97,5 +98,12 @@ router.patch('/sources/:id', sources.update);
 router.delete('/sources/:id', sources.remove);
 router.post('/sources/:id/projects/:projectId', sources.linkProject);
 router.delete('/sources/:id/projects/:projectId', sources.unlinkProject);
+
+// Document templates
+router.get('/document-templates', docTemplates.list);
+router.post('/document-templates/upload', upload.single('file'), docTemplates.upload);
+router.post('/document-templates', docTemplates.create);
+router.patch('/document-templates/:id', docTemplates.update);
+router.delete('/document-templates/:id', docTemplates.remove);
 
 module.exports = router;

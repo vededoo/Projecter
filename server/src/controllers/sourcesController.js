@@ -3,7 +3,7 @@ const path        = require('path');
 const { query }   = require('../utils/db');
 const { serialize, parseAttributes, errorResponse } = require('../utils/jsonapi');
 const logger      = require('../utils/logger');
-const fileManager = require('../utils/fileManager');
+const fileManager = require('../utils/localFileManager');
 const { parseDocument } = require('../services/documentParser');
 
 const VIEW_COLS = `id, title, source_type, description,
@@ -214,7 +214,7 @@ exports.serveFile = async (req, res, next) => {
     }
     const { storage_path, original_filename, mime_type } = rows[0];
     const filePath = fileManager.resolvePath('sources', storage_path);
-    if (!(await fileManager.exists(filePath))) {
+    if (!fileManager.exists(filePath)) {
       return res.status(404).json(errorResponse(404, 'File not found on disk'));
     }
     const isPdf = (mime_type || '').includes('pdf');
