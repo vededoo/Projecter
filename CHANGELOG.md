@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5] - 2026-05-08
+
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.0.4
+## 🔹 Autres changements
+- fix(localFileManager): use absolute path with NODE_ENV instead of fragile relative path
+
 ## [1.0.4] - 2026-05-08
 
 ## ✨ Nouvelles fonctionnalités
