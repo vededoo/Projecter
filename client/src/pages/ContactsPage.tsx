@@ -48,7 +48,7 @@ interface FacetsResponse {
 
 // ─── Définition des colonnes ─────────────────────────────────────────────
 type ColKey =
-  | '#' | 'last_name' | 'first_name' | 'email' | 'phone' | 'job_title'
+  | '#' | 'id' | 'last_name' | 'first_name' | 'email' | 'phone' | 'job_title'
   | 'department' | 'company_name' | 'organization_code'
   | 'manager_name' | 'office_location' | 'city' | 'country'
   | 'employee_id' | 'sam_account_name' | 'graph_synced_at' | 'updated_at';
@@ -67,6 +67,8 @@ const fmtDate = (s: string | null) => s ? new Date(s).toLocaleDateString() : '�
 const COLUMNS: ColumnDef[] = [
   { key: '#',                 label: '#',          sortable: false, defaultVisible: true,  width: '48px',
     render: (_, idx) => <span className="muted">{idx + 1}</span> },
+  { key: 'id',                label: 'ID',         sortable: true,  defaultVisible: true,  width: '60px',
+    render: (c) => <span className="muted" style={{ fontFamily: 'monospace', fontSize: 12 }}>#{c.id}</span> },
   { key: 'last_name',         label: 'Last name',  sortable: true,  defaultVisible: true,
     render: (c) => <strong>{c.last_name}</strong> },
   { key: 'first_name',        label: 'First name', sortable: true,  defaultVisible: true,
