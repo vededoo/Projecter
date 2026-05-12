@@ -19,7 +19,10 @@ const NAV: { key: View; label: string }[] = [
 ];
 
 function App() {
-  const [view, setView] = useState<View>('projects');
+  const [view, setView] = useState<View>(() => {
+    const hash = window.location.hash.replace('#', '') as View;
+    return NAV.some(n => n.key === hash) ? hash : 'projects';
+  });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
   const renderMain = () => {
@@ -45,7 +48,7 @@ function App() {
             <button
               key={n.key}
               className={view === n.key ? 'active' : ''}
-              onClick={() => { setView(n.key); setSelectedProject(null); }}
+              onClick={() => { setView(n.key); setSelectedProject(null); window.location.hash = n.key; }}
             >
               {n.label}
             </button>

@@ -245,6 +245,16 @@ export function MeetingsPage() {
           .catch(() => {})
           .finally(() => setSpeakersLoading(false));
       }
+      // Charger les attendees depuis GET /meetings/:id (la liste ne les inclut pas)
+      fetch(`/api/meetings/${id}`)
+        .then(r => r.json())
+        .then(body => {
+          const attendees = body.data?.attributes?.attendees || [];
+          setItems(prev => prev.map(it =>
+            it.id === id ? { ...it, attributes: { ...it.attributes, attendees } } : it
+          ));
+        })
+        .catch(() => {});
     }
   }, [selectedId, items, stopSSE, startSSEProgress]);
 

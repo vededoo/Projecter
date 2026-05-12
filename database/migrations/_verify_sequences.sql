@@ -1,0 +1,23 @@
+SELECT 'roles'                       AS seq, last_value, is_called FROM roles_id_seq
+UNION ALL SELECT 'competency_centers',        last_value, is_called FROM competency_centers_id_seq
+UNION ALL SELECT 'document_templates',        last_value, is_called FROM document_templates_id_seq
+UNION ALL SELECT 'projects',                  last_value, is_called FROM projects_id_seq
+UNION ALL SELECT 'organizations',             last_value, is_called FROM organizations_id_seq
+UNION ALL SELECT 'risks',                     last_value, is_called FROM risks_id_seq
+UNION ALL SELECT 'public_procurements',       last_value, is_called FROM public_procurements_id_seq
+UNION ALL SELECT 'contacts',                  last_value, is_called FROM contacts_id_seq
+UNION ALL SELECT 'meetings',                  last_value, is_called FROM meetings_id_seq
+UNION ALL SELECT 'project_members',           last_value, is_called FROM project_members_id_seq
+UNION ALL SELECT 'project_status_history',    last_value, is_called FROM project_status_history_id_seq
+UNION ALL SELECT 'sources',                   last_value, is_called FROM project_sources_id_seq
+UNION ALL SELECT 'source_projects',           last_value, is_called FROM source_projects_id_seq
+UNION ALL SELECT 'risk_projects',             last_value, is_called FROM risk_projects_id_seq
+UNION ALL SELECT 'documents',                 last_value, is_called FROM documents_id_seq
+UNION ALL SELECT 'memberships',               last_value, is_called FROM memberships_id_seq
+UNION ALL SELECT 'meeting_attendees',         last_value, is_called FROM meeting_attendees_id_seq
+UNION ALL SELECT 'meeting_topics',            last_value, is_called FROM meeting_topics_id_seq
+UNION ALL SELECT 'meeting_decisions',         last_value, is_called FROM meeting_decisions_id_seq
+UNION ALL SELECT 'timeline_events',           last_value, is_called FROM timeline_events_id_seq
+UNION ALL SELECT 'document_files',            last_value, is_called FROM document_files_id_seq
+UNION ALL SELECT 'meeting_actions',           last_value, is_called FROM meeting_actions_id_seq
+ORDER BY last_value;

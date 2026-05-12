@@ -25,6 +25,7 @@ coverage/
 # Storage (données runtime)
 storage/uploads/*
 storage/generated/*
+storage/audio/*
 !storage/uploads/.gitkeep
 !storage/generated/.gitkeep
 

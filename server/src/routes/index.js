@@ -8,8 +8,10 @@ const members  = require('../controllers/projectMembersController');
 const documents = require('../controllers/documentsController');
 const meetings  = require('../controllers/meetingsController');
 const sources   = require('../controllers/sourcesController');
-const transformer = require('../controllers/transformerController');
-const docTemplates = require('../controllers/documentTemplatesController');
+const transformer    = require('../controllers/transformerController');
+const docTemplates   = require('../controllers/documentTemplatesController');
+const transcription  = require('../controllers/transcriptionController');
+const diarization    = require('../controllers/diarizationController');
 
 // Multer en mémoire — 20 Mo max
 const upload = multer({
@@ -86,10 +88,31 @@ router.patch('/meetings/:id', meetings.update);
 router.delete('/meetings/:id', meetings.remove);
 router.post('/meetings/:id/attendees', meetings.addAttendee);
 router.delete('/meetings/:id/attendees/:contactId', meetings.removeAttendee);
-// Transformer integration
+// Transformer integration (affichage transcript existant dans Transformer)
 router.post('/meetings/:id/inject-transcript', transformer.injectTranscript);
 router.post('/meetings/:id/transcript-webhook', transformer.receiveTranscript);
 router.get('/transformer/texts/:id', transformer.getText);
+// Transcription directe via Transcripter (upload audio → Whisper + diarization)
+const uploadAudio = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 },  // 500 Mo max pour les enregistrements longs
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.(mp3|mp4|m4a|wav|ogg|webm|flac)$/i.test(file.originalname)
+      || /^audio\//i.test(file.mimetype)
+      || file.mimetype === 'video/mp4';
+    ok ? cb(null, true) : cb(new Error(`Format audio non supporté : ${file.mimetype}`));
+  },
+});
+router.post('/meetings/:id/upload-audio',           uploadAudio.single('audio'), transcription.uploadAudio);
+router.post('/meetings/:id/start-transcription',    transcription.startTranscription);
+router.get('/meetings/:id/transcription-progress',  transcription.transcriptionProgress);
+router.get('/meetings/:id/transcription-status',    transcription.transcriptionStatus);
+// Speaker diarization (voice-id P3)
+router.get('/meetings/:id/speakers',                diarization.list);
+router.post('/meetings/:id/speakers/sync',          diarization.sync);
+router.post('/meetings/:id/speakers/identify',      diarization.identify);
+router.patch('/meetings/:id/speakers/:label',       diarization.update);
+router.delete('/meetings/:id/speakers',             diarization.reset);
 
 // Sources (documents de référence — N-to-N projets)
 router.get('/sources', sources.list);

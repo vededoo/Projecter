@@ -7,11 +7,13 @@ const COLS = `id, project_id, title, type, start_at, end_at, location, video_lin
               transformer_transcript_id, minutes, decisions, actions,
               raw_transcript, extraction_status, extraction_error,
               extracted_at, validated_at, executive_summary, ai_report,
+              audio_path, transcription_status, transcription_error, transcription_segments,
               created_at, updated_at`;
 
 const FIELDS = ['title', 'type', 'start_at', 'end_at', 'location', 'video_link',
                 'transformer_transcript_id', 'minutes', 'decisions', 'actions',
-                'raw_transcript', 'extraction_status', 'executive_summary', 'ai_report'];
+                'raw_transcript', 'extraction_status', 'executive_summary', 'ai_report',
+                'audio_path', 'transcription_status'];
 
 const ENUM_CASTS = { type: '::meeting_type' };
 
