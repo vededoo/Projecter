@@ -58,6 +58,15 @@ class LocalFileManager {
     return this.resolvePath(dirKey);
   }
 
+  /**
+   * Retourne le chemin absolu du fichier audio d'une réunion.
+   * @param {number|string} meetingId
+   * @param {string} ext - extension avec le point (ex: '.mp3')
+   */
+  resolveAudioPath(meetingId, ext) {
+    return this.resolvePath('audio', `meeting-${meetingId}${ext}`);
+  }
+
   // ── Initialisation ────────────────────────────────────────────────────────────
 
   /**

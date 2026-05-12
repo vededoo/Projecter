@@ -10,18 +10,11 @@
  */
 
 const path = require('path');
-const fs   = require('fs');
 const { query }                    = require('../utils/db');
 const { parseAttributes, errorResponse } = require('../utils/jsonapi');
 const transcripterClient           = require('../services/transcripterClient');
 const logger                       = require('../utils/logger');
-
-// Répertoire de stockage des fichiers audio uploadés
-const AUDIO_DIR = process.env.AUDIO_UPLOAD_DIR
-  || path.join(__dirname, '../../../storage/audio');
-
-// S'assurer que le répertoire existe au démarrage
-fs.mkdirSync(AUDIO_DIR, { recursive: true });
+const localFileManager             = require('../utils/localFileManager');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,10 +64,9 @@ exports.uploadAudio = async (req, res, next) => {
     // Déterminer l'extension à partir du mimetype ou du nom original
     const original = req.file.originalname || '';
     const ext = path.extname(original).toLowerCase() || '.mp3';
-    const filename = `meeting-${meetingId}${ext}`;
-    const audioPath = path.join(AUDIO_DIR, filename);
+    const audioPath = localFileManager.resolveAudioPath(meetingId, ext);
 
-    fs.writeFileSync(audioPath, req.file.buffer);
+    localFileManager.writeFileSync(audioPath, req.file.buffer);
     logger.info(`💾 Audio uploadé pour meeting ${meetingId} → ${audioPath} (${req.file.size} bytes)`);
 
     await query(
@@ -112,7 +104,7 @@ exports.startTranscription = async (req, res, next) => {
     if (!rows[0]) return res.status(404).json(errorResponse(404, 'Meeting not found'));
     const meeting = rows[0];
 
-    if (!meeting.audio_path || !fs.existsSync(meeting.audio_path)) {
+    if (!meeting.audio_path || !localFileManager.exists(meeting.audio_path)) {
       return res.status(422).json(errorResponse(422, 'No audio file — upload audio first'));
     }
     if (meeting.transcription_status === 'running') {

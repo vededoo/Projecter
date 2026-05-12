@@ -17,12 +17,14 @@ const basePath   = rootPath ? path.join(rootPath, currentEnv) : null;
 //   templates/   → templates .docx (docxtemplater)
 //   documents/   → .docx générés depuis templates
 //   exports/     → exports texte / rapport PDF
+//   audio/       → enregistrements audio des réunions
 //
 const directories = {
   sources:   { path: 'sources/'   },
   templates: { path: 'templates/' },
   documents: { path: 'documents/' },
   exports:   { path: 'exports/'   },
+  audio:     { path: 'audio/'     },
 };
 
 let baseDirPaths = null;
