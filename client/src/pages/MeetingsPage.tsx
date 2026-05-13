@@ -15,11 +15,20 @@ const MEETING_TYPES = [
   { value: 'other',                label: 'Other' },
 ] as const;
 
+interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+  speaker?: string;
+  words?: { start: number; end: number; text: string }[];
+}
+
 interface Meeting {
   project_id: number | null; type: string; title: string;
   start_at: string; end_at: string | null;
   location: string | null;
   raw_transcript: string | null;
+  transcription_segments: TranscriptSegment[] | null;
   executive_summary: string | null;
   ai_report: string | null;
   extraction_status: string;
@@ -77,6 +86,29 @@ interface Speaker {
   validated_by_user: boolean;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const SPEAKER_COLORS = [
+  '#1976d2', '#388e3c', '#f57c00', '#7b1fa2',
+  '#c62828', '#00838f', '#558b2f', '#6d4c41',
+];
+
+function speakerIdx(label: string): number {
+  const m = label.match(/(\d+)$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function speakerColor(label: string): string {
+  return SPEAKER_COLORS[speakerIdx(label) % SPEAKER_COLORS.length];
+}
+
+function fmtTime(seconds: number): string {
+  if (!seconds || isNaN(seconds)) return '00:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export function MeetingsPage() {
   const [items, setItems] = useState<MeetingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +150,18 @@ export function MeetingsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editFields, setEditFields] = useState<EditFields>({ executive_summary: '', minutes: '' });
   const [editSaving, setEditSaving] = useState(false);
+
+  // ── Audio player + segment navigation ──
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(1);
+  const [activeSegIdx, setActiveSegIdx] = useState(-1);
+  const [segFilter, setSegFilter] = useState<string | null>(null);
+  const activeSegRef = useRef<HTMLDivElement | null>(null);
+  const segListRef = useRef<HTMLDivElement | null>(null);
 
   const flash = useCallback((text: string, kind: 'ok' | 'err' = 'ok') => {
     setFlashMsg({ text, kind });
@@ -580,6 +624,94 @@ export function MeetingsPage() {
     setForm(prev => ({ ...prev, [k]: v }));
   }, []);
 
+  // ── Audio player callbacks ──────────────────────────────────────────────────
+
+  // Créer/détruire l'élément audio quand le meeting sélectionné change
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
+    setAudioPlaying(false);
+    setActiveSegIdx(-1);
+    setSegFilter(null);
+
+    if (!selectedId) return;
+    const audioUrl = `/api/meetings/${selectedId}/audio`;
+    const audio = new Audio(audioUrl);
+    audio.preload = 'metadata';
+    audioRef.current = audio;
+
+    audio.addEventListener('loadedmetadata', () => setAudioDuration(audio.duration));
+    audio.addEventListener('timeupdate', () => {
+      setAudioCurrentTime(audio.currentTime);
+    });
+    audio.addEventListener('ended', () => setAudioPlaying(false));
+    audio.addEventListener('error', () => { /* audio unavailable — silently ignore */ });
+
+    return () => {
+      audio.pause();
+      audio.src = '';
+    };
+  }, [selectedId]);
+
+  // Sync activeSegIdx avec le temps audio courant
+  useEffect(() => {
+    if (!selected?.attributes.transcription_segments) return;
+    const segs = selected.attributes.transcription_segments;
+    const t = audioCurrentTime;
+    // Trouver le segment actif (dernier dont start <= t)
+    let idx = -1;
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i].start <= t) idx = i;
+      else break;
+    }
+    setActiveSegIdx(idx);
+  }, [audioCurrentTime, selected?.attributes.transcription_segments]);
+
+  // Auto-scroll vers le segment actif
+  useEffect(() => {
+    if (activeSegRef.current && segListRef.current) {
+      const container = segListRef.current;
+      const active = activeSegRef.current;
+      const cr = container.getBoundingClientRect();
+      const ar = active.getBoundingClientRect();
+      if (ar.top < cr.top || ar.bottom > cr.bottom) {
+        active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [activeSegIdx]);
+
+  const handleAudioSeek = useCallback((time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setAudioCurrentTime(time);
+    }
+  }, []);
+
+  const handleSegmentClick = useCallback((seg: TranscriptSegment) => {
+    handleAudioSeek(seg.start);
+    if (audioRef.current && !audioPlaying) {
+      audioRef.current.play().catch(() => {});
+      setAudioPlaying(true);
+    }
+  }, [handleAudioSeek, audioPlaying]);
+
+  const toggleAudioPlay = useCallback(() => {
+    if (!audioRef.current) return;
+    if (audioPlaying) { audioRef.current.pause(); setAudioPlaying(false); }
+    else { audioRef.current.play().catch(() => {}); setAudioPlaying(true); }
+  }, [audioPlaying]);
+
+  const audioSkip = useCallback((delta: number) => {
+    if (!audioRef.current) return;
+    const t = Math.max(0, Math.min(audioDuration, audioRef.current.currentTime + delta));
+    handleAudioSeek(t);
+  }, [audioDuration, handleAudioSeek]);
+
   const txStatus = selected?.attributes.transcription_status ?? 'idle';
   const txStallSeconds = txLastSeen ? Math.floor((Date.now() - txLastSeen) / 1000) : 0;
   const PHASES: { key: string; label: string }[] = [
@@ -924,6 +1056,186 @@ export function MeetingsPage() {
               )}
             </div>
           )}
+
+          {/* ─── Transcript viewer : segments + player audio ─── */}
+          {txStatus === 'done' && selected.attributes.transcription_segments && selected.attributes.transcription_segments.length > 0 && (() => {
+            const segs = selected.attributes.transcription_segments!;
+            // Liste des speakers distincts présents dans les segments
+            const speakerLabels = Array.from(new Set(segs.map(s => s.speaker).filter(Boolean) as string[]));
+            const hasAudio = !!selected.attributes.audio_path;
+            const filteredSegs = segFilter ? segs.filter(s => s.speaker === segFilter) : segs;
+            // Correspondance label → display_name depuis speakers chargés
+            const speakerName = (label: string) => {
+              const sp = speakers.find(s => s.label === label);
+              return sp?.display_name || label;
+            };
+
+            return (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                  <strong>Transcript</strong>
+                  <span className="badge">{segs.length} segments</span>
+                  {fmtTime(segs[segs.length - 1]?.end || 0) && (
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {fmtTime(segs[segs.length - 1]?.end || 0)} total
+                    </span>
+                  )}
+                  {/* Filter by speaker */}
+                  {speakerLabels.length > 0 && (
+                    <>
+                      <span className="muted" style={{ fontSize: 12 }}>Filter:</span>
+                      <button
+                        className={segFilter === null ? 'btn' : 'btn-ghost'}
+                        style={{ fontSize: 11, padding: '2px 8px' }}
+                        onClick={() => setSegFilter(null)}
+                      >All</button>
+                      {speakerLabels.map(lbl => (
+                        <button key={lbl}
+                          className={segFilter === lbl ? 'btn' : 'btn-ghost'}
+                          style={{
+                            fontSize: 11, padding: '2px 8px',
+                            color: segFilter === lbl ? '#fff' : speakerColor(lbl),
+                            borderColor: speakerColor(lbl),
+                            background: segFilter === lbl ? speakerColor(lbl) : 'transparent',
+                          }}
+                          onClick={() => setSegFilter(l => l === lbl ? null : lbl)}
+                        >{speakerName(lbl)}</button>
+                      ))}
+                    </>
+                  )}
+                </div>
+
+                {/* Audio player inline */}
+                {hasAudio ? (
+                  <div style={{
+                    background: 'var(--panel-2)', border: '1px solid var(--border)',
+                    borderRadius: 6, padding: '8px 12px', marginBottom: 10,
+                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  }}>
+                    {/* Play/Pause */}
+                    <button
+                      className="btn"
+                      style={{ padding: '4px 12px', fontSize: 16, minWidth: 40 }}
+                      onClick={toggleAudioPlay}
+                    >{audioPlaying ? '⏸' : '▶'}</button>
+
+                    {/* Rewind / Forward */}
+                    <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => audioSkip(-10)}>-10s</button>
+                    <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => audioSkip(10)}>+10s</button>
+
+                    {/* Progress bar */}
+                    <input
+                      type="range"
+                      min={0}
+                      max={audioDuration || 100}
+                      step={0.5}
+                      value={audioCurrentTime}
+                      style={{ flex: 1, minWidth: 100, accentColor: 'var(--accent)' }}
+                      onChange={e => handleAudioSeek(Number(e.target.value))}
+                    />
+
+                    {/* Timecode */}
+                    <span style={{ fontFamily: 'monospace', fontSize: 12, minWidth: 90, textAlign: 'right' }}>
+                      {fmtTime(audioCurrentTime)} / {fmtTime(audioDuration)}
+                    </span>
+
+                    {/* Volume */}
+                    <button
+                      className="btn-ghost"
+                      style={{ fontSize: 13 }}
+                      onClick={() => {
+                        if (audioRef.current) {
+                          const newMuted = !audioMuted;
+                          setAudioMuted(newMuted);
+                          audioRef.current.muted = newMuted;
+                        }
+                      }}
+                    >{audioMuted ? '🔇' : '🔊'}</button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={audioMuted ? 0 : audioVolume}
+                      style={{ width: 60, accentColor: 'var(--accent)' }}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setAudioVolume(v);
+                        setAudioMuted(false);
+                        if (audioRef.current) { audioRef.current.volume = v; audioRef.current.muted = false; }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontStyle: 'italic' }}>
+                    No audio file — upload an audio file to enable playback
+                  </div>
+                )}
+
+                {/* Segment list */}
+                <div
+                  ref={segListRef}
+                  style={{
+                    maxHeight: 420, overflowY: 'auto', border: '1px solid var(--border)',
+                    borderRadius: 6, background: 'var(--panel-2)',
+                  }}
+                >
+                  {filteredSegs.map((seg, i) => {
+                    const realIdx = segs.indexOf(seg);
+                    const isActive = realIdx === activeSegIdx;
+                    const color = seg.speaker ? speakerColor(seg.speaker) : null;
+                    const name = seg.speaker ? speakerName(seg.speaker) : null;
+                    return (
+                      <div
+                        key={realIdx}
+                        ref={isActive ? activeSegRef : null}
+                        onClick={() => handleSegmentClick(seg)}
+                        style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 8,
+                          padding: '6px 10px',
+                          cursor: hasAudio ? 'pointer' : 'default',
+                          borderBottom: '1px solid var(--border)',
+                          background: isActive ? 'var(--accent)' : 'transparent',
+                          color: isActive ? '#fff' : 'var(--text)',
+                          borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--panel)'; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {/* Timecode */}
+                        <span style={{
+                          fontFamily: 'monospace', fontSize: 11,
+                          background: isActive ? 'rgba(255,255,255,.2)' : 'var(--panel)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4, padding: '1px 5px',
+                          flexShrink: 0, marginTop: 1,
+                          color: isActive ? '#fff' : 'var(--muted)',
+                        }}>{fmtTime(seg.start)}</span>
+
+                        {/* Speaker badge */}
+                        {name && color && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, flexShrink: 0,
+                            padding: '1px 6px', borderRadius: 8, marginTop: 2,
+                            background: isActive ? 'rgba(255,255,255,.25)' : `${color}22`,
+                            color: isActive ? '#fff' : color,
+                            border: `1px solid ${isActive ? 'rgba(255,255,255,.5)' : color}`,
+                          }}>{name}</span>
+                        )}
+
+                        {/* Text */}
+                        <span style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>
+                          {seg.text.trim()}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Transcription */}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>

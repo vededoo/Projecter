@@ -200,6 +200,61 @@ exports.transcriptionProgress = async (req, res, next) => {
   }
 };
 
+// ─── GET /api/meetings/:id/audio ─────────────────────────────────────────────
+// Stream le fichier audio avec support des range requests (seek dans le player).
+
+exports.streamAudio = async (req, res, next) => {
+  try {
+    const meetingId = req.params.id;
+    const { rows } = await query(
+      'SELECT audio_path FROM meetings WHERE id = $1',
+      [meetingId]
+    );
+    if (!rows[0]) return res.status(404).json(errorResponse(404, 'Meeting not found'));
+
+    const audioPath = rows[0].audio_path;
+    if (!audioPath || !localFileManager.exists(audioPath)) {
+      return res.status(404).json(errorResponse(404, 'Audio file not found'));
+    }
+
+    const fs = require('fs');
+    const stat = fs.statSync(audioPath);
+    const fileSize = stat.size;
+    const ext = path.extname(audioPath).toLowerCase();
+    const contentType = ext === '.mp4' ? 'video/mp4'
+      : ext === '.webm' ? 'audio/webm'
+      : ext === '.ogg'  ? 'audio/ogg'
+      : ext === '.wav'  ? 'audio/wav'
+      : 'audio/mpeg';
+
+    const commonHeaders = {
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+    };
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
+      const stream = fs.createReadStream(audioPath, { start, end });
+      res.writeHead(206, {
+        ...commonHeaders,
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Content-Length': chunkSize,
+      });
+      stream.pipe(res);
+    } else {
+      res.writeHead(200, { ...commonHeaders, 'Content-Length': fileSize });
+      fs.createReadStream(audioPath).pipe(res);
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
 // ─── GET /api/meetings/:id/transcription-status ──────────────────────────────
 // Polling léger : retourne le statut courant (idle/running/done/error).
 

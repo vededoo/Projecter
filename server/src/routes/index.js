@@ -107,6 +107,7 @@ router.post('/meetings/:id/upload-audio',           uploadAudio.single('audio'),
 router.post('/meetings/:id/start-transcription',    transcription.startTranscription);
 router.get('/meetings/:id/transcription-progress',  transcription.transcriptionProgress);
 router.get('/meetings/:id/transcription-status',    transcription.transcriptionStatus);
+router.get('/meetings/:id/audio',                   transcription.streamAudio);
 // Speaker diarization (voice-id P3)
 router.get('/meetings/:id/speakers',                diarization.list);
 router.post('/meetings/:id/speakers/sync',          diarization.sync);
