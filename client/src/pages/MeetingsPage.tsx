@@ -156,8 +156,8 @@ export function MeetingsPage() {
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioPlaying, setAudioPlaying] = useState(false);
-  const [audioMuted, setAudioMuted] = useState(false);
   const [audioVolume, setAudioVolume] = useState(1);
+  const [audioError, setAudioError] = useState(false);
   const [activeSegIdx, setActiveSegIdx] = useState(-1);
   const [segFilter, setSegFilter] = useState<string | null>(null);
   const activeSegRef = useRef<HTMLDivElement | null>(null);
@@ -636,6 +636,7 @@ export function MeetingsPage() {
     setAudioCurrentTime(0);
     setAudioDuration(0);
     setAudioPlaying(false);
+    setAudioError(false);
     setActiveSegIdx(-1);
     setSegFilter(null);
 
@@ -650,7 +651,7 @@ export function MeetingsPage() {
       setAudioCurrentTime(audio.currentTime);
     });
     audio.addEventListener('ended', () => setAudioPlaying(false));
-    audio.addEventListener('error', () => { /* audio unavailable — silently ignore */ });
+    audio.addEventListener('error', () => { setAudioError(true); setAudioPlaying(false); });
 
     return () => {
       audio.pause();
@@ -1107,7 +1108,7 @@ export function MeetingsPage() {
                 </div>
 
                 {/* Audio player inline */}
-                {hasAudio ? (
+                {hasAudio && !audioError ? (
                   <div style={{
                     background: 'var(--panel-2)', border: '1px solid var(--border)',
                     borderRadius: 6, padding: '8px 12px', marginBottom: 10,
@@ -1141,31 +1142,23 @@ export function MeetingsPage() {
                     </span>
 
                     {/* Volume */}
-                    <button
-                      className="btn-ghost"
-                      style={{ fontSize: 13 }}
-                      onClick={() => {
-                        if (audioRef.current) {
-                          const newMuted = !audioMuted;
-                          setAudioMuted(newMuted);
-                          audioRef.current.muted = newMuted;
-                        }
-                      }}
-                    >{audioMuted ? '🔇' : '🔊'}</button>
                     <input
                       type="range"
                       min={0}
                       max={1}
                       step={0.05}
-                      value={audioMuted ? 0 : audioVolume}
+                      value={audioVolume}
                       style={{ width: 60, accentColor: 'var(--accent)' }}
                       onChange={e => {
                         const v = Number(e.target.value);
                         setAudioVolume(v);
-                        setAudioMuted(false);
-                        if (audioRef.current) { audioRef.current.volume = v; audioRef.current.muted = false; }
+                        if (audioRef.current) { audioRef.current.volume = v; }
                       }}
                     />
+                  </div>
+                ) : audioError ? (
+                  <div style={{ fontSize: 12, color: 'var(--danger, #e55)', marginBottom: 8, fontStyle: 'italic' }}>
+                    ⚠ Audio file not found on server — upload a new audio file to enable playback
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontStyle: 'italic' }}>

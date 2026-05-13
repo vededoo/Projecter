@@ -123,6 +123,106 @@ async function transcribeAudio({
 }
 
 /**
+ * Convertit un audio arbitraire en MP3 normalisé via Transcripter.
+ * Bytes-in / bytes-out : aucun chemin partagé.
+ *
+ * @param {Buffer} buffer        - Contenu binaire du fichier source
+ * @param {object} [opts]
+ * @param {string} [opts.filename='input']
+ * @param {string} [opts.mimeType='application/octet-stream']
+ * @param {string} [opts.bitrate='128k']
+ * @param {number} [opts.channels=1]
+ * @param {number} [opts.sampleRate=44100]
+ * @returns {Promise<Buffer>}    - Contenu MP3 normalisé
+ */
+async function convertAudio(buffer, opts = {}) {
+  const {
+    filename   = 'input',
+    mimeType   = 'application/octet-stream',
+    bitrate    = '128k',
+    channels   = 1,
+    sampleRate = 44100,
+  } = opts;
+
+  const url = `${TRANSCRIPTER_URL}/api/audio/convert`;
+  const boundary = `----ProjecterBoundary${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+
+  // Build multipart body
+  const textField = (name, value) =>
+    `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`;
+
+  const fileHeader =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="file"; filename="${filename.replace(/"/g, '')}"\r\n` +
+    `Content-Type: ${mimeType}\r\n\r\n`;
+
+  const closing = `\r\n--${boundary}--\r\n`;
+
+  const body = Buffer.concat([
+    Buffer.from(textField('bitrate', bitrate)),
+    Buffer.from(textField('channels', String(channels))),
+    Buffer.from(textField('sampleRate', String(sampleRate))),
+    Buffer.from(fileHeader),
+    buffer,
+    Buffer.from(closing),
+  ]);
+
+  logger.info(`📤 [transcripterClient] convertAudio → ${url} (${buffer.length}B → mp3 ${bitrate})`);
+
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const transport = parsedUrl.protocol === 'https:' ? https : http;
+
+    const req = transport.request(
+      {
+        hostname: parsedUrl.hostname,
+        port:     parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path:     parsedUrl.pathname,
+        method:   'POST',
+        headers: {
+          'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
+        },
+        timeout: 30 * 60 * 1000, // 30 min
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const out = Buffer.concat(chunks);
+          if (res.statusCode >= 400) {
+            let detail = `HTTP ${res.statusCode}`;
+            try {
+              const j = JSON.parse(out.toString());
+              detail = j.errors?.[0]?.detail || detail;
+            } catch { /* binary or non-JSON */ }
+            reject(new Error(`Transcripter convertAudio: ${detail}`));
+            return;
+          }
+          logger.info(`✅ [transcripterClient] convertAudio done (${out.length}B mp3)`);
+          resolve(out);
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Transcripter convertAudio timeout (30min)'));
+    });
+    req.on('error', (e) => {
+      if (e.code === 'ECONNREFUSED') {
+        reject(new Error(`Service Transcripter non disponible sur ${TRANSCRIPTER_URL}`));
+      } else {
+        reject(e);
+      }
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
  * Vérifie la disponibilité du service Transcripter.
  * @returns {Promise<boolean>}
  */
@@ -201,4 +301,4 @@ function pipeProgress(textId, clientReq, clientRes) {
   logger.info(`📡 [transcripterClient] pipeProgress → ${upstreamUrl}`);
 }
 
-module.exports = { transcribeAudio, healthCheck, pipeProgress, TRANSCRIPTER_URL, TRANSCRIPTER_DEVICE };
+module.exports = { transcribeAudio, convertAudio, healthCheck, pipeProgress, TRANSCRIPTER_URL, TRANSCRIPTER_DEVICE };

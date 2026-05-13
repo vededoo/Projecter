@@ -144,4 +144,138 @@ async function enrollBestEffort({ contactId, audioPath, segments, validatedByUse
   }
 }
 
-module.exports = { identify, enrollBestEffort };
+// ─── Bytes-in helpers (modular Option B) ─────────────────────────────────────
+//
+// Caller (Projecter) reads the audio file from its own storage and uploads
+// the bytes to voice-id via multipart/form-data. No shared filesystem coupling.
+
+function _multipartRequest(urlStr, fields, fileBuf, fileName, mimeType, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const parsed    = new URL(urlStr);
+    const transport = parsed.protocol === 'https:' ? https : http;
+    const boundary  = `----ProjecterVoiceId${Date.now()}${Math.random().toString(36).slice(2, 10)}`;
+
+    const parts = [];
+    for (const [name, value] of Object.entries(fields)) {
+      if (value === undefined || value === null) continue;
+      parts.push(Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${name}"\r\n\r\n` +
+        `${value}\r\n`
+      ));
+    }
+    parts.push(Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n`
+    ));
+    parts.push(fileBuf);
+    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+    const body = Buffer.concat(parts);
+
+    const req = transport.request(
+      {
+        hostname: parsed.hostname,
+        port:     parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path:     parsed.pathname + (parsed.search || ''),
+        method:   'POST',
+        headers:  {
+          'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(Buffer.concat(chunks).toString());
+            if (res.statusCode >= 400) {
+              const detail = json.errors?.[0]?.detail || `HTTP ${res.statusCode}`;
+              reject(new Error(`voice-id error: ${detail}`));
+            } else {
+              resolve(json.data?.attributes || json);
+            }
+          } catch (e) {
+            reject(new Error(`voice-id bad response: ${e.message}`));
+          }
+        });
+      }
+    );
+    req.on('timeout', () => { req.destroy(); reject(new Error(`voice-id timeout (${timeoutMs}ms)`)); });
+    req.on('error', (e) => {
+      if (e.code === 'ECONNREFUSED') {
+        reject(new Error(`Service voice-id non disponible sur ${VOICE_ID_URL}`));
+      } else {
+        reject(e);
+      }
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Identify locuteurs via bytes-in (multipart upload).
+ *
+ * @param {Buffer} audioBuffer   Bytes du fichier audio (mp3 typiquement)
+ * @param {Array<{label,start,end}>} segments
+ * @param {object} [opts]
+ * @param {string} [opts.device]
+ * @param {string} [opts.fileName='audio.mp3']
+ * @param {string} [opts.mimeType='audio/mpeg']
+ * @returns {Promise<Array>} matches
+ */
+async function identifyBytes(audioBuffer, segments, opts = {}) {
+  const url = `${VOICE_ID_URL}/api/voice/identify-bytes`;
+  logger.info(`🔍 [voiceIdClient] identify-bytes segments=${segments.length} size=${audioBuffer.length}B`);
+  const attrs = await _multipartRequest(
+    url,
+    {
+      segments: JSON.stringify(segments),
+      device:   opts.device || process.env.VOICE_ID_DEVICE || 'mps',
+    },
+    audioBuffer,
+    opts.fileName || 'audio.mp3',
+    opts.mimeType || 'audio/mpeg',
+    IDENTIFY_TIMEOUT_MS
+  );
+  return attrs.matches || [];
+}
+
+/**
+ * Enroll best-effort via bytes-in. Ne rejette pas si voice-id KO.
+ *
+ * @param {number} contactId
+ * @param {Buffer} audioBuffer
+ * @param {Array<{label,start,end}>} segments
+ * @param {object} [opts]
+ * @param {boolean} [opts.validatedByUser=false]
+ * @param {string}  [opts.device]
+ * @param {string}  [opts.fileName='audio.mp3']
+ * @param {string}  [opts.mimeType='audio/mpeg']
+ */
+async function enrollBytesBestEffort(contactId, audioBuffer, segments, opts = {}) {
+  try {
+    const url = `${VOICE_ID_URL}/api/voice/enroll-bytes`;
+    logger.info(`💾 [voiceIdClient] enroll-bytes contact=${contactId} segments=${segments.length} size=${audioBuffer.length}B`);
+    await _multipartRequest(
+      url,
+      {
+        segments:          JSON.stringify(segments),
+        contact_id:        String(contactId),
+        validated_by_user: String(!!opts.validatedByUser),
+        device:            opts.device || process.env.VOICE_ID_DEVICE || 'mps',
+      },
+      audioBuffer,
+      opts.fileName || 'audio.mp3',
+      opts.mimeType || 'audio/mpeg',
+      IDENTIFY_TIMEOUT_MS
+    );
+  } catch (err) {
+    logger.warn(`⚠️ [voiceIdClient] enroll-bytes best-effort failed: ${err.message}`);
+  }
+}
+
+module.exports = { identify, enrollBestEffort, identifyBytes, enrollBytesBestEffort };

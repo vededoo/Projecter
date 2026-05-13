@@ -59,12 +59,16 @@ class LocalFileManager {
   }
 
   /**
-   * Retourne le chemin absolu du fichier audio d'une réunion.
+   * Retourne le chemin absolu canonique du fichier audio d'une réunion.
+   * Convention : `{audioDir}/{meetingId}.mp3` — toujours mp3 normalisé.
+   * Optionnellement, on peut surcharger l'extension (ex: '.json' pour fichiers
+   * dérivés). Par défaut '.mp3'.
+   *
    * @param {number|string} meetingId
-   * @param {string} ext - extension avec le point (ex: '.mp3')
+   * @param {string} [ext='.mp3'] - extension avec le point
    */
-  resolveAudioPath(meetingId, ext) {
-    return this.resolvePath('audio', `meeting-${meetingId}${ext}`);
+  resolveAudioPath(meetingId, ext = '.mp3') {
+    return this.resolvePath('audio', `${meetingId}${ext}`);
   }
 
   // ── Initialisation ────────────────────────────────────────────────────────────

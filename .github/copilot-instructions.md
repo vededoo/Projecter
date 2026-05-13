@@ -20,4 +20,5 @@
 - **ENUMs PostgreSQL** : Toujours caster (`$4::project_status`, `$5::urgence_level`)
 - **JSONB** : Passer `JSON.stringify(...)` côté pg, pas l'objet brut
 - **Doc partagée** : `Projecter_dev/docs/shared-docs/` (symlink vers Shared/docs)
+- **Contrat producteur/consommateur** : Avant d'écrire du code qui consomme un retour de fonction/API/service, **lire d'abord le code source du producteur** pour vérifier ce qu'il retourne réellement. Tracer le pipe : `[Producteur retourne {…}]` → `[Consommateur lit .X]` → `.X` est-il bien présent dans `{…}` ? Ne jamais supposer qu'une clé existe sans l'avoir vérifiée.
 - **Déploiement PRD** : Ne JAMAIS faire `git pull/checkout` manuellement dans `Projecter_prd/`, ni reconstruire le client, ni toucher au serveur PRD directement. Toujours demander à l'utilisateur de lancer `./deploy.sh <version>` (c'est lui qui choisit le numéro de tag).

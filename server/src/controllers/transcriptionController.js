@@ -49,7 +49,8 @@ function formatTime(seconds) {
 
 // ─── POST /api/meetings/:id/upload-audio ─────────────────────────────────────
 // Multer (déclaré dans routes) dépose le fichier dans req.file (memoryStorage).
-// On le réécrit sur disque dans AUDIO_DIR sous le nom `meeting-{id}.{ext}`.
+// On délègue la conversion mp3 128k mono à Transcripter (bytes-in/bytes-out),
+// puis on persiste le résultat sous le nom canonique `{meetingId}.mp3`.
 
 exports.uploadAudio = async (req, res, next) => {
   try {
@@ -61,13 +62,17 @@ exports.uploadAudio = async (req, res, next) => {
     const { rows } = await query('SELECT id FROM meetings WHERE id = $1', [meetingId]);
     if (!rows[0]) return res.status(404).json(errorResponse(404, 'Meeting not found'));
 
-    // Déterminer l'extension à partir du mimetype ou du nom original
-    const original = req.file.originalname || '';
-    const ext = path.extname(original).toLowerCase() || '.mp3';
-    const audioPath = localFileManager.resolveAudioPath(meetingId, ext);
+    // Conversion → mp3 128k mono via Transcripter
+    const mp3Buffer = await transcripterClient.convertAudio(req.file.buffer, {
+      filename: req.file.originalname || `meeting-${meetingId}`,
+      mimeType: req.file.mimetype || 'application/octet-stream',
+      bitrate:  '128k',
+      channels: 1,
+    });
 
-    localFileManager.writeFileSync(audioPath, req.file.buffer);
-    logger.info(`💾 Audio uploadé pour meeting ${meetingId} → ${audioPath} (${req.file.size} bytes)`);
+    const audioPath = localFileManager.resolveAudioPath(meetingId); // → {audioDir}/{id}.mp3
+    localFileManager.writeFileSync(audioPath, mp3Buffer);
+    logger.info(`💾 Audio uploadé+converti pour meeting ${meetingId} → ${audioPath} (${mp3Buffer.length} bytes mp3, source ${req.file.size}B)`);
 
     await query(
       `UPDATE meetings
@@ -80,7 +85,7 @@ exports.uploadAudio = async (req, res, next) => {
       data: {
         id: String(meetingId),
         type: 'meeting-audio',
-        attributes: { audio_path: audioPath, size_bytes: req.file.size },
+        attributes: { audio_path: audioPath, size_bytes: mp3Buffer.length },
       },
     });
   } catch (e) {

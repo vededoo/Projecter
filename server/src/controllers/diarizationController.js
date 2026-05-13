@@ -3,13 +3,15 @@
  * diarizationController.js — Gestion des locuteurs détectés après transcription.
  *
  * Routes :
- *   GET    /api/meetings/:id/speakers           → liste des locuteurs (DB + stats segments)
- *   POST   /api/meetings/:id/speakers/sync      → (re)crée les speakers depuis transcription_segments
- *   POST   /api/meetings/:id/speakers/identify  → appelle voice-id pour suggestions auto
- *   PATCH  /api/meetings/:id/speakers/:label    → assigne un contact à un locuteur
- *   DELETE /api/meetings/:id/speakers           → remet à zéro tous les locuteurs du meeting
+ *   GET    /api/meetings/:id/speakers                    → liste des locuteurs (DB + stats segments)
+ *   POST   /api/meetings/:id/speakers/sync               → (re)crée les speakers depuis transcription_segments
+ *   POST   /api/meetings/:id/speakers/identify           → appelle voice-id pour suggestions auto
+ *   PATCH  /api/meetings/:id/speakers/:label             → assigne un contact à un locuteur
+ *   DELETE /api/meetings/:id/speakers                    → remet à zéro tous les locuteurs du meeting
  */
 
+const fs                  = require('fs');
+const path                = require('path');
 const { query }           = require('../utils/db');
 const { parseAttributes, errorResponse } = require('../utils/jsonapi');
 const voiceIdClient       = require('../services/voiceIdClient');
@@ -139,7 +141,6 @@ exports.sync = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// ─── POST /api/meetings/:id/speakers/identify ────────────────────────────────
 // Appelle voice-id pour suggérer un contact pour chaque locuteur.
 // Les suggestions sont stockées dans meeting_speakers.
 
@@ -178,11 +179,19 @@ exports.identify = async (req, res, next) => {
       return res.status(422).json(errorResponse(422, 'All speaker segments are too short (< 2s)'));
     }
 
-    logger.info(`🔍 [diarization] identify meeting ${meetingId} — ${querySegs.length} segments → voice-id`);
+    logger.info(`🔍 [diarization] identify meeting ${meetingId} — ${querySegs.length} segments → voice-id (bytes)`);
 
-    const matches = await voiceIdClient.identify({
-      audioPath: meeting.audio_path,
-      segments:  querySegs,
+    let audioBuffer;
+    try {
+      audioBuffer = fs.readFileSync(meeting.audio_path);
+    } catch (e) {
+      return res.status(422).json(errorResponse(422, `Cannot read audio file: ${e.message}`));
+    }
+    const fileName = path.basename(meeting.audio_path);
+
+    const matches = await voiceIdClient.identifyBytes(audioBuffer, querySegs, {
+      fileName,
+      mimeType: 'audio/mpeg',
     });
 
     // Agréger les matches par label (multiple segments → garder le meilleur score)
@@ -264,12 +273,19 @@ exports.update = async (req, res, next) => {
       const enrollSegs  = longest.filter((s) => s.dur >= 2).map((s) => ({ label, start: s.start, end: s.end }));
 
       if (enrollSegs.length > 0) {
-        voiceIdClient.enrollBestEffort({
-          contactId:       Number(attrs.contact_id),
-          audioPath:       meeting.audio_path,
-          segments:        enrollSegs,
-          validatedByUser: !!attrs.validated_by_user,
-        });
+        try {
+          const audioBuffer = fs.readFileSync(meeting.audio_path);
+          const fileName    = path.basename(meeting.audio_path);
+          // Fire-and-forget — best-effort, never blocks the response
+          voiceIdClient.enrollBytesBestEffort(
+            Number(attrs.contact_id),
+            audioBuffer,
+            enrollSegs,
+            { validatedByUser: !!attrs.validated_by_user, fileName, mimeType: 'audio/mpeg' }
+          );
+        } catch (e) {
+          logger.warn(`⚠️ [diarization] enroll-bytes skipped (audio read failed): ${e.message}`);
+        }
       }
     }
 
