@@ -249,9 +249,14 @@ rm -rf node_modules
 if [ -f "$DEV_DIR/server/package-lock.json" ]; then
     cp "$DEV_DIR/server/package-lock.json" .
 fi
-if ! npm ci --omit=dev; then
-    echo "❌ npm ci server a échoué"
-    exit 1
+if ! npm ci --omit=dev 2>/dev/null; then
+    echo "⚠️  npm ci server a échoué (lockfile désynchronisé ?), fallback npm install..."
+    rm -rf node_modules
+    if ! npm install --omit=dev; then
+        echo "❌ npm install server a échoué"
+        exit 1
+    fi
+    cp package-lock.json "$DEV_DIR/server/package-lock.json" 2>/dev/null || true
 fi
 if ! npm ls --omit=dev --all >/dev/null 2>&1; then
     echo "❌ server : node_modules incomplet"
@@ -267,9 +272,14 @@ rm -rf node_modules tsconfig.tsbuildinfo .tsbuildinfo build
 if [ -f "$DEV_DIR/client/package-lock.json" ]; then
     cp "$DEV_DIR/client/package-lock.json" .
 fi
-if ! npm ci --legacy-peer-deps; then
-    echo "❌ npm ci client a échoué"
-    exit 1
+if ! npm ci --legacy-peer-deps 2>/dev/null; then
+    echo "⚠️  npm ci client a échoué, fallback npm install..."
+    rm -rf node_modules
+    if ! npm install --legacy-peer-deps; then
+        echo "❌ npm install client a échoué"
+        exit 1
+    fi
+    cp package-lock.json "$DEV_DIR/client/package-lock.json" 2>/dev/null || true
 fi
 npm run build
 

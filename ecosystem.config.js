@@ -20,7 +20,7 @@ module.exports = {
     // ═══════════════════════════════════════════
     {
       name: 'projecter_dev_server',
-      cwd: './server',
+      cwd: './Projecter_dev/server',
       script: 'src/app.js',
       watch: ['src'],
       ignore_watch: ['node_modules', 'logs', 'storage'],
@@ -42,7 +42,7 @@ module.exports = {
     // ═══════════════════════════════════════════
     {
       name: 'projecter_dev_client',
-      cwd: './client',
+      cwd: './Projecter_dev/client',
       script: 'npm',
       args: 'start',
       watch: false,
