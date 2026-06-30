@@ -326,23 +326,14 @@ echo ""
 echo "🔄 (Re)démarrage des services PM2 de production..."
 cd "$BASE_DIR"
 
+# Pattern bulletproof : delete (silencieux si absent) + start.
+# Évite les bugs "Process N not found" de `pm2 restart` après save/resurrect.
 for process in projecter_prd_server projecter_prd_client; do
-    # Status possible: online | stopped | errored | <vide si absent>
-    status=$(pm2 jlist 2>/dev/null | node -e "
-      let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
-        try{const a=JSON.parse(d); const p=a.find(x=>x.name==='$process');
-          console.log(p?p.pm2_env.status:'absent');}catch(e){console.log('absent');}
-      });" 2>/dev/null || echo "absent")
-
-    if [ "$status" = "online" ]; then
-        pm2 restart "$process" --update-env && echo "   ✅ $process redémarré"
-    elif [ "$status" = "absent" ]; then
-        pm2 start ecosystem.config.js --only "$process" && echo "   ✅ $process démarré (nouveau)"
+    pm2 delete "$process" >/dev/null 2>&1 || true
+    if pm2 start ecosystem.config.js --only "$process" >/dev/null; then
+        echo "   ✅ $process démarré"
     else
-        # stopped/errored: delete + start propre (sinon restart peut échouer avec "Process N not found")
-        echo "   ♻️  $process est $status → delete + start propre"
-        pm2 delete "$process" >/dev/null 2>&1
-        pm2 start ecosystem.config.js --only "$process" && echo "   ✅ $process démarré"
+        echo "   ❌ Échec du démarrage de $process"
     fi
 done
 pm2 save --force >/dev/null 2>&1
