@@ -1,0 +1,20 @@
+# Changelog
+
+## [1.1.0] - 2026-06-30
+
+## ✨ Nouvelles fonctionnalités
+- meeting journals (actions, decisions, questions, issues) + meeting types
+- ajout de la gestion des erreurs audio et conversion MP3 dans les contrôleurs
+- transcript viewer + audio player in meeting detail
+- ajouter la gestion centralisée des fichiers audio  pour les réunions
+## 🐛 Corrections
+- reset stuck transcription + show ID in meetings & contacts pages
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.0.5
+## 🔧 Maintenance
+- gitignore runtime token/credentials files in storage/
+## 🔹 Autres changements
+- fix(deploy): align with Languapp/Services pattern (git archive flat extraction)
+- Refactor code structure for improved readability and maintainability
+- Refactor code structure for improved readability and maintainability
+
