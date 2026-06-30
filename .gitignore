@@ -29,6 +29,10 @@ storage/audio/*
 !storage/uploads/.gitkeep
 !storage/generated/.gitkeep
 
+# Secrets / tokens runtime — ne JAMAIS committer
+**/storage/*token*.json
+**/storage/*credentials*.json
+
 # Editeurs
 .vscode/
 .idea/
