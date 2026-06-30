@@ -65,7 +65,7 @@ function listMigrationFiles() {
     throw new Error(`Migrations folder not found: ${MIGRATIONS_DIR}`);
   }
   return fs.readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.sql') && !f.startsWith('_'))
     .sort();
 }
 
