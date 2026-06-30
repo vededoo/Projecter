@@ -7,20 +7,6 @@ import WhisperSuggestionsPanel from '../components/WhisperSuggestionsPanel';
 import { SortablePersonList } from '../components/SortablePersonList';
 import { useContactEditor } from '../components/useContactEditor';
 
-const MEETING_TYPES = [
-  { value: 'etnic_excom',          label: 'ETNIC ExCom' },
-  { value: 'wbe_excom',            label: 'WBE ExCom' },
-  { value: 'governance_committee', label: 'Governance Committee' },
-  { value: 'steering_committee',   label: 'Steering Committee' },
-  { value: 'portfolio_committee',  label: 'Portfolio Committee' },
-  { value: 'technical_wg',         label: 'Technical WG' },
-  { value: 'functional_wg',        label: 'Functional WG' },
-  { value: 'procurement_wg',       label: 'Procurement WG' },
-  { value: 'kickoff',              label: 'Kickoff' },
-  { value: 'follow_up',            label: 'Follow-up' },
-  { value: 'other',                label: 'Other' },
-] as const;
-
 interface TranscriptSegment {
   start: number;
   end: number;
@@ -65,6 +51,13 @@ interface MeetingItem {
   }
 }
 interface ProjectOption { id: string; code: string | null; title: string }
+interface MeetingTypeOption { id: string; code: string; label: string; category: string; active: boolean; sort_order: number }
+interface ProjectStakeholder {
+  contact_id: number;
+  first_name: string | null;
+  last_name: string;
+  role: string | null;
+}
 
 interface EditFields { executive_summary: string; minutes: string; mail_cr: string }
 
@@ -79,12 +72,10 @@ interface NewMeetingForm {
   project_id: string;
 }
 
-const MEETING_CATEGORIES = [
-  { value: 'formal',     label: 'Formal meeting' },
-  { value: 'informal',   label: 'Informal exchange' },
-  { value: 'phone_call', label: 'Phone call' },
-  { value: 'video_call', label: 'Ad-hoc video call' },
-] as const;
+const CATEGORY_LABELS: Record<string, string> = {
+  formal:   'Formal meeting',
+  informal: 'Informal exchange',
+};
 
 const EMPTY_FORM: NewMeetingForm = {
   title: '', type: 'follow_up', meeting_category: 'formal',
@@ -102,14 +93,15 @@ interface TxPhase {
   timestamp?: number;
 }
 
-type DetailTabKey = 'overview' | 'cr_mail' | 'cr_complet' | 'cr_structure' | 'transcript';
+type DetailTabKey = 'executive_summary' | 'mail_mm' | 'full_mm' | 'structured_mm' | 'transcript' | 'participants';
 
 const DETAIL_TABS: { key: DetailTabKey; label: string }[] = [
-  { key: 'overview',      label: 'Overview'       },
-  { key: 'cr_mail',       label: 'CR mail'         },
-  { key: 'cr_complet',    label: 'CR complet'      },
-  { key: 'cr_structure',  label: 'CR structuré'    },
-  { key: 'transcript',    label: 'Transcript'      },
+  { key: 'executive_summary', label: 'Executive Summary' },
+  { key: 'mail_mm',           label: 'Mail MM'           },
+  { key: 'full_mm',           label: 'Full MM'           },
+  { key: 'structured_mm',     label: 'Structured MM'     },
+  { key: 'transcript',        label: 'Transcript'        },
+  { key: 'participants',      label: 'Participants'      },
 ];
 
 type OutlookStep = 'checking' | 'not_connected' | 'device_flow' | 'connected' | 'events' | 'importing';
@@ -170,6 +162,7 @@ function fmtTime(seconds: number): string {
 export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [items, setItems] = useState<MeetingItem[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [meetingTypes, setMeetingTypes] = useState<MeetingTypeOption[]>([]);
   const autoSelectRef = useRef<string | undefined>(initialSelectedId);
   const [sortCol, setSortCol] = useState('start_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -185,6 +178,11 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
     if (!p) return `#${pid}`;
     return p.code ? `[${p.code}] ${p.title}` : p.title;
   };
+
+  const meetingTypeLabel = useCallback((type: string | null | undefined) => {
+    if (!type) return '—';
+    return meetingTypes.find(mt => mt.code === type)?.label || type;
+  }, [meetingTypes]);
 
   const sortedItems = useMemo(() => [...items].sort((a, b) => {
     let av: any, bv: any;
@@ -203,6 +201,27 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
     if (av > bv) return sortDir === 'asc' ? 1 : -1;
     return 0;
   }), [items, sortCol, sortDir, projects]);
+
+  const sortedMeetingTypes = useMemo(
+    () => [...meetingTypes].sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label)),
+    [meetingTypes]
+  );
+
+  // Catégories disponibles dérivées des types chargés (ordre stable : formal d'abord)
+  const availableCategories = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { value: string; label: string }[] = [];
+    for (const mt of sortedMeetingTypes) {
+      if (!seen.has(mt.category)) {
+        seen.add(mt.category);
+        result.push({ value: mt.category, label: CATEGORY_LABELS[mt.category] || mt.category });
+      }
+    }
+    // Garantir que formal apparaît en premier même si aucun type n'est chargé encore
+    if (!seen.has('formal')) result.unshift({ value: 'formal', label: 'Formal meeting' });
+    if (!seen.has('informal')) result.push({ value: 'informal', label: 'Informal exchange' });
+    return result;
+  }, [sortedMeetingTypes]);
 
   const SortTh = ({ col, label, style }: { col: string; label: string; style?: React.CSSProperties }) => {
     const isSorted = sortCol === col;
@@ -272,8 +291,8 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
   const [validating, setValidating] = useState(false);
 
   // ── Detail tab ──
-  const [detailTab, setDetailTab] = useState<DetailTabKey>('overview');
-  const [overviewSubTab, setOverviewSubTab] = useState<'summary' | 'participants'>('summary');
+  const [detailTab, setDetailTab] = useState<DetailTabKey>('executive_summary');
+  const [projectStakeholders, setProjectStakeholders] = useState<ProjectStakeholder[]>([]);
 
   // ── Édition de contact depuis la liste des participants ──
   const { openContactEditor, contactEditor } = useContactEditor();
@@ -404,6 +423,31 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
     setProjectTopics((body.data || []).map((x: any) => ({ id: Number(x.id), title: x.attributes.title })));
   }, []);
 
+  const loadMeetingTypes = useCallback(() => {
+    api.get<JsonApiList<{ code: string; label: string; category: string; active: boolean; sort_order: number }>>('/meeting-types?active=1')
+      .then(r => setMeetingTypes(r.data.map(mt => ({ id: mt.id, ...mt.attributes }))))
+      .catch(() => {});
+  }, []);
+
+  const loadProjectStakeholders = useCallback(async (projectId: number | null | undefined) => {
+    if (!projectId) {
+      setProjectStakeholders([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/project-members?project_id=${projectId}`);
+      const body = await res.json();
+      setProjectStakeholders((body.data || []).map((d: any) => ({
+        contact_id: d.attributes.contact_id,
+        first_name: d.attributes.first_name,
+        last_name: d.attributes.last_name,
+        role: d.attributes.role_label || d.attributes.role || null,
+      })));
+    } catch {
+      setProjectStakeholders([]);
+    }
+  }, []);
+
   const loadRegistry = useCallback(async (projectId: number) => {
     const res = await fetch(`/api/topics-registry?project_id=${projectId}`);
     if (!res.ok) return;
@@ -458,6 +502,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
             .then(res => res.json())
             .then(body => {
               const attrs = body.data?.attributes || {};
+              loadProjectStakeholders(attrs.project_id || null);
               setItems(prev => prev.map(it =>
                 it.id === pendingId ? { ...it, attributes: { ...it.attributes,
                   attendees: attrs.attendees || [],
@@ -471,7 +516,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
         }
       })
       .catch(e => setError(e.message));
-  }, []);
+  }, [loadProjectStakeholders]);
 
   const importOutlookEvent = useCallback(async (eventId: string) => {
     setOutlookImporting(eventId);
@@ -500,10 +545,11 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
 
   useEffect(() => {
     loadMeetings();
+    loadMeetingTypes();
     api.get<JsonApiList<{ code: string | null; title: string }>>('/projects')
       .then(r => setProjects(r.data.map(p => ({ id: p.id, code: p.attributes.code, title: p.attributes.title }))))
       .catch(() => {});
-  }, [loadMeetings]);
+  }, [loadMeetings, loadMeetingTypes]);
 
   useEffect(() => { return () => {
     txEventSourceRef.current?.close();
@@ -606,13 +652,14 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
   const selected = items.find(it => it.id === selectedId) || null;
 
   const handleSelect = useCallback((id: string) => {
-    if (selectedId === id) { setSelectedId(null); setEditOpen(false); setShowRaw(false); stopSSE(); setSpeakers([]); return; }
+    if (selectedId === id) { setSelectedId(null); setEditOpen(false); setShowRaw(false); stopSSE(); setSpeakers([]); setProjectStakeholders([]); return; }
     stopSSE();
     setSelectedId(id);
     setShowRaw(false);
     setEditOpen(false);
     setShowTxOptions(false);
     setSpeakers([]);
+    setProjectStakeholders([]);
     const item = items.find(it => it.id === id);
     if (item) {
       setEditFields({
@@ -645,8 +692,10 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           ));
         })
         .catch(() => {});
+      // Charger les stakeholders du projet pour le quick-add (onglet Participants)
+      loadProjectStakeholders(item.attributes.project_id);
     }
-  }, [selectedId, items, stopSSE, startSSEProgress]);
+  }, [selectedId, items, stopSSE, startSSEProgress, loadProjectStakeholders]);
 
   const handleUploadAudio = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -677,24 +726,27 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
     }, 250);
   }, []);
 
-  const handleAddAttendee = useCallback(async (contact: ContactSuggestion) => {
+  const handleAddAttendee = useCallback(async (contact: ContactSuggestion, preferredRole?: string | null) => {
     if (!selectedId) return;
     setAttendeeSearch('');
     setContactSuggestions([]);
+    const stakeholderRole = projectStakeholders.find(s => s.contact_id === Number(contact.id))?.role || null;
+    const role = preferredRole ?? stakeholderRole;
     try {
       await fetch(`/api/meetings/${selectedId}/attendees`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: { type: 'meeting-attendee', attributes: { contact_id: Number(contact.id), status: 'invited' } } }),
+        body: JSON.stringify({ data: { type: 'meeting-attendee', attributes: { contact_id: Number(contact.id), status: 'invited', role } } }),
       });
-      const newAttendee: Attendee = { contact_id: Number(contact.id), status: 'invited', last_name: contact.last_name, first_name: contact.first_name, role: null };
+      const newAttendee: Attendee = { contact_id: Number(contact.id), status: 'invited', last_name: contact.last_name, first_name: contact.first_name, role };
       setItems(prev => prev.map(it =>
         it.id === selectedId
           ? { ...it, attributes: { ...it.attributes, attendees: [...(it.attributes.attendees || []), newAttendee] } }
           : it
       ));
+      loadProjectStakeholders(items.find(it => it.id === selectedId)?.attributes.project_id);
     } catch { flash('Failed to add attendee', 'err'); }
-  }, [selectedId, flash]);
+  }, [selectedId, flash, items, loadProjectStakeholders, projectStakeholders]);
 
   const handleReorderAttendees = useCallback(async (newOrder: number[]) => {
     if (!selectedId) return;
@@ -764,8 +816,9 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           ? { ...it, attributes: { ...it.attributes, attendees: (it.attributes.attendees || []).filter(a => a.contact_id !== contactId) } }
           : it
       ));
+      loadProjectStakeholders(items.find(it => it.id === selectedId)?.attributes.project_id);
     } catch { flash('Failed to remove attendee', 'err'); }
-  }, [selectedId, flash]);
+  }, [selectedId, flash, items, loadProjectStakeholders]);
 
   // Recharge les participants depuis le serveur (après édition d'un contact)
   const reloadAttendees = useCallback(async () => {
@@ -1124,8 +1177,8 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
 
   // Reset detail tab when switching meeting
   useEffect(() => {
-    setDetailTab('overview');
-    setOverviewSubTab('summary');
+    setDetailTab('executive_summary');
+    setProjectStakeholders([]);
   }, [selectedId]);
 
   // Créer/détruire l'élément audio quand le meeting sélectionné change
@@ -1249,12 +1302,21 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Meetings ({items.length})</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn-ghost" onClick={openOutlookModal} title="Import a meeting from Outlook calendar">
-            📅 Import from Outlook
-          </button>
-          <button className="btn" onClick={() => { setShowForm(v => !v); setForm(EMPTY_FORM); }}>
-            {showForm ? '✕ Cancel' : '+ New Meeting'}
-          </button>
+          {!showForm && (
+            <>
+              <button className="btn-ghost" onClick={openOutlookModal} title="Import a meeting from Outlook calendar">
+                📅 Import from Outlook
+              </button>
+              <button className="btn" onClick={() => { setShowForm(true); setForm(EMPTY_FORM); }}>
+                + New Meeting
+              </button>
+            </>
+          )}
+          {showForm && (
+            <button className="btn" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}>
+              ✕ Close Form
+            </button>
+          )}
         </div>
       </div>
 
@@ -1277,18 +1339,23 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
             <div>
               <label className="field-label">Category *</label>
               <select className="input" required value={form.meeting_category}
-                onChange={e => setF('meeting_category', e.target.value)}>
-                {MEETING_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                onChange={e => {
+                  const cat = e.target.value;
+                  const firstType = sortedMeetingTypes.find(t => t.active && t.category === cat)?.code || '';
+                  setForm(prev => ({ ...prev, meeting_category: cat, type: firstType }));
+                }}>
+                {availableCategories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
-            {form.meeting_category === 'formal' && (
-              <div>
-                <label className="field-label">Type *</label>
-                <select className="input" required value={form.type} onChange={e => setF('type', e.target.value)}>
-                  {MEETING_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-              </div>
-            )}
+            <div>
+              <label className="field-label">Type *</label>
+              <select className="input" required value={form.type} onChange={e => setF('type', e.target.value)}>
+                <option value="">— select type —</option>
+                {sortedMeetingTypes.filter(t => t.active && t.category === form.meeting_category).map(t => (
+                  <option key={t.id} value={t.code}>{t.label}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="field-label">Project</label>
               <select className="input" value={form.project_id} onChange={e => setF('project_id', e.target.value)}>
@@ -1303,34 +1370,25 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
               <input className="input" type="datetime-local" required value={form.start_at}
                 onChange={e => setF('start_at', e.target.value)} />
             </div>
-            {form.meeting_category === 'formal' && (
-              <div>
-                <label className="field-label">End</label>
-                <input className="input" type="datetime-local" value={form.end_at}
-                  onChange={e => setF('end_at', e.target.value)} />
-              </div>
-            )}
-            {form.meeting_category === 'formal' && (
-              <div>
-                <label className="field-label">Location</label>
-                <input className="input" value={form.location}
-                  onChange={e => setF('location', e.target.value)} placeholder="Room / URL" />
-              </div>
-            )}
-            {form.meeting_category === 'formal' && (
-              <div>
-                <label className="field-label">Video link</label>
-                <input className="input" value={form.video_link}
-                  onChange={e => setF('video_link', e.target.value)} placeholder="https://…" />
-              </div>
-            )}
+            <div>
+              <label className="field-label">End</label>
+              <input className="input" type="datetime-local" value={form.end_at}
+                onChange={e => setF('end_at', e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">Location</label>
+              <input className="input" value={form.location}
+                onChange={e => setF('location', e.target.value)} placeholder="Room / URL" />
+            </div>
+            <div>
+              <label className="field-label">Video link</label>
+              <input className="input" value={form.video_link}
+                onChange={e => setF('video_link', e.target.value)} placeholder="https://…" />
+            </div>
             <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" className="btn-ghost" style={{ fontSize: 12 }}
                 onClick={() => { setOutlookFillFormMode(true); openOutlookModal(); }}>
                 📅 From Outlook
-              </button>
-              <button type="button" className="btn-ghost" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}>
-                Cancel
               </button>
               <button type="submit" className="btn" disabled={formSaving}>
                 {formSaving ? 'Saving…' : 'Create'}
@@ -1362,7 +1420,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                   ? <span className="badge" style={{ background: 'var(--panel-2)', color: 'var(--muted)' }}>{it.attributes.meeting_category}</span>
                   : <span className="muted">—</span>
                 }</td>
-                <td><span className="badge">{it.attributes.type}</span></td>
+                <td><span className="badge">{meetingTypeLabel(it.attributes.type)}</span></td>
                 <td>{it.attributes.title}</td>
                 <td className="muted">{it.attributes.location || '—'}</td>
                 <td>
@@ -1417,11 +1475,65 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16, fontSize: 13 }}>
             <div><span className="muted">ID : </span><span style={{ fontFamily: 'monospace' }}>#{selected.id}</span></div>
             <div><span className="muted">Date : </span>{new Date(selected.attributes.start_at).toLocaleString('fr-FR')}</div>
-            <div><span className="muted">Type : </span><span className="badge">{selected.attributes.type}</span></div>
-            <div><span className="muted">Category : </span><span className="badge" style={{
-              background: selected.attributes.meeting_category !== 'formal' ? 'var(--panel-2)' : undefined,
-              color: selected.attributes.meeting_category !== 'formal' ? '#888' : undefined,
-            }}>{selected.attributes.meeting_category || 'formal'}</span></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="muted">Category : </span>
+              <select
+                value={selected.attributes.meeting_category || 'formal'}
+                style={{ fontSize: 13, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--panel-2)', color: 'var(--text)', cursor: 'pointer' }}
+                onChange={async e => {
+                  const nextCat = e.target.value;
+                  const firstType = sortedMeetingTypes.find(t => t.active && t.category === nextCat)?.code || '';
+                  const res = await fetch(`/api/meetings/${selectedId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: { type: 'meeting', attributes: { meeting_category: nextCat, type: firstType } } }),
+                  });
+                  if (res.ok) {
+                    setItems(prev => prev.map(it => it.id === selectedId
+                      ? { ...it, attributes: { ...it.attributes, meeting_category: nextCat, type: firstType } }
+                      : it
+                    ));
+                    flash(`Category updated to ${CATEGORY_LABELS[nextCat] || nextCat}`);
+                  } else {
+                    flash('Failed to update category', 'err');
+                  }
+                }}
+              >
+                {availableCategories.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="muted">Type : </span>
+              <select
+                value={selected.attributes.type}
+                style={{ fontSize: 13, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--panel-2)', color: 'var(--text)', cursor: 'pointer' }}
+                onChange={async e => {
+                  const nextType = e.target.value;
+                  const res = await fetch(`/api/meetings/${selectedId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: { type: 'meeting', attributes: { type: nextType } } }),
+                  });
+                  if (res.ok) {
+                    setItems(prev => prev.map(it => it.id === selectedId
+                      ? { ...it, attributes: { ...it.attributes, type: nextType } }
+                      : it
+                    ));
+                    flash(`Meeting type updated: ${meetingTypeLabel(nextType)}`);
+                  } else {
+                    flash('Failed to update meeting type', 'err');
+                  }
+                }}
+              >
+                {sortedMeetingTypes
+                  .filter(t => t.category === (selected.attributes.meeting_category || 'formal'))
+                  .map(t => (
+                    <option key={t.id} value={t.code}>{t.label}</option>
+                  ))}
+              </select>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span className="muted">Project : </span>
               <select
@@ -1440,6 +1552,8 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                       : it
                     ));
                     flash(newProjectId ? `Linked to project #${newProjectId}` : 'Project unlinked');
+                    // Recharger les stakeholders pour le nouveau projet (quick-add)
+                    loadProjectStakeholders(newProjectId);
                   } else {
                     flash('Failed to update project', 'err');
                   }
@@ -1469,32 +1583,9 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
             ))}
           </div>
 
-          {/* Overview sub-tab bar */}
-          {detailTab === 'overview' && (
-          <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
-            {(['summary', 'participants'] as const).map(st => (
-              <button
-                key={st}
-                onClick={() => setOverviewSubTab(st)}
-                style={{
-                  background: 'none', border: 'none',
-                  borderBottom: overviewSubTab === st ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1, padding: '6px 16px', cursor: 'pointer', fontSize: 12,
-                  fontWeight: overviewSubTab === st ? 700 : 400,
-                  color: overviewSubTab === st ? 'var(--text)' : 'var(--muted)',
-                  transition: 'color 0.15s',
-                }}
-              >
-                {st === 'summary'
-                  ? 'Executive summary'
-                  : `Participants (${(selected.attributes.attendees || []).length})`}
-              </button>
-            ))}
-          </div>
-          )}
 
           {/* Participants */}
-          {detailTab === 'overview' && overviewSubTab === 'participants' && (
+          {detailTab === 'participants' && (
           <div style={{ paddingTop: 4, marginBottom: 12 }}>
             {attendeeLoading && <span className="muted" style={{ fontSize: 12 }}>…</span>}
 
@@ -1510,11 +1601,16 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                   ),
                   role: (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {(() => {
+                        const stakeholderRole = projectStakeholders.find(s => s.contact_id === a.contact_id)?.role || null;
+                        const effectiveRole = a.role || stakeholderRole;
+                        return (
+                          <>
                       <button
-                        onClick={e => { e.stopPropagation(); handleUpdateAttendeeRole(a.contact_id, a.role === 'Meeting Organiser' ? '' : 'Meeting Organiser'); }}
+                        onClick={e => { e.stopPropagation(); handleUpdateAttendeeRole(a.contact_id, effectiveRole === 'Meeting Organiser' ? '' : 'Meeting Organiser'); }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 14 }}
-                        title={a.role === 'Meeting Organiser' ? 'Remove organiser' : 'Set as organiser'}
-                      >{a.role === 'Meeting Organiser' ? '⭐' : '☆'}</button>
+                        title={effectiveRole === 'Meeting Organiser' ? 'Remove organiser' : 'Set as organiser'}
+                      >{effectiveRole === 'Meeting Organiser' ? '⭐' : '☆'}</button>
                       {editingRoleId === a.contact_id ? (
                         <input
                           ref={editingRoleInputRef}
@@ -1531,11 +1627,14 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                         />
                       ) : (
                         <span
-                          onClick={() => { setEditingRoleId(a.contact_id); setEditingRoleValue(a.role || ''); }}
-                          style={{ fontSize: 12, cursor: 'pointer', color: a.role ? 'var(--text)' : 'var(--muted)', fontStyle: a.role ? 'normal' : 'italic', borderBottom: '1px dashed var(--border)' }}
+                          onClick={() => { setEditingRoleId(a.contact_id); setEditingRoleValue(effectiveRole || ''); }}
+                          style={{ fontSize: 12, cursor: 'pointer', color: effectiveRole ? 'var(--text)' : 'var(--muted)', fontStyle: effectiveRole ? 'normal' : 'italic', borderBottom: '1px dashed var(--border)' }}
                           title="Click to edit role"
-                        >{a.role === 'Meeting Organiser' ? 'Organiser' : (a.role || '+ role')}</span>
+                        >{effectiveRole === 'Meeting Organiser' ? 'Organiser' : (effectiveRole || '+ role')}</span>
                       )}
+                          </>
+                        );
+                      })()}
                     </span>
                   ),
                   context: (
@@ -1561,6 +1660,46 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
               />
             )}
 
+            {/* Quick-add stakeholders du projet */}
+            {projectStakeholders.length > 0 && (() => {
+              const attendeeIds = new Set((selected.attributes.attendees || []).map((a: any) => a.contact_id));
+              const available = projectStakeholders.filter(s => !attendeeIds.has(s.contact_id));
+              if (!available.length) return null;
+              return (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+                    Quick-add from project stakeholders:
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {available.map(s => (
+                      <button
+                        key={s.contact_id}
+                        onClick={() => handleAddAttendee({
+                          id: String(s.contact_id),
+                          first_name: s.first_name,
+                          last_name: s.last_name,
+                          job_title: null,
+                          company_name: null,
+                        }, s.role)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          background: 'var(--panel-2)', color: 'var(--text)',
+                          border: '1px dashed var(--border)', borderRadius: 8,
+                          padding: '3px 10px', fontSize: 12, cursor: 'pointer',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text)'; }}
+                        title={`Add ${s.first_name ? s.first_name + ' ' + s.last_name : s.last_name} as participant`}
+                      >
+                        + {s.first_name ? `${s.first_name} ${s.last_name}` : s.last_name}
+                        {s.role && <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 3 }}>· {s.role}</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Add attendee typeahead */}
             <div style={{ position: 'relative', maxWidth: 320, marginTop: 12 }}>
               <input
@@ -1573,8 +1712,8 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
               {contactSuggestions.length > 0 && (
                 <div style={{
                   position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20,
-                  background: '#fff', border: '1px solid #ddd', borderRadius: 4,
-                  boxShadow: '0 4px 12px rgba(0,0,0,.12)', maxHeight: 220, overflowY: 'auto',
+                  background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 4,
+                  boxShadow: '0 4px 12px rgba(0,0,0,.18)', maxHeight: 220, overflowY: 'auto',
                 }}>
                   {contactSuggestions
                     .filter(c => !(selected.attributes.attendees || []).some(a => a.contact_id === Number(c.id)))
@@ -1582,8 +1721,8 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                       <div
                         key={c.id}
                         onClick={() => handleAddAttendee(c)}
-                        style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f0f0f0' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = '#f5f5f5')}
+                        style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)', color: 'var(--text)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--panel-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}
                       >
                         <span style={{ fontWeight: 500 }}>
@@ -2169,7 +2308,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           )}
 
           {/* ── AI Extraction ─────────────────────────────────────── */}
-          {detailTab === 'cr_structure' && (
+          {detailTab === 'structured_mm' && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
               <strong>AI Extraction</strong>
@@ -2501,7 +2640,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           )}
 
           {/* Executive summary (display) */}
-          {detailTab === 'overview' && overviewSubTab === 'summary' && selected.attributes.executive_summary && !editOpen && (
+          {detailTab === 'executive_summary' && selected.attributes.executive_summary && !editOpen && (
             <div style={{ paddingTop: 4 }}>
               <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text)' }}>
                 {selected.attributes.executive_summary
@@ -2517,7 +2656,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           )}
 
           {/* Edit toggle — overview */}
-          {detailTab === 'overview' && overviewSubTab === 'summary' && (
+          {detailTab === 'executive_summary' && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
             <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditOpen(v => !v)}>
               {editOpen ? '▲ Hide edit' : '✏️ Edit summary'}
@@ -2526,7 +2665,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           )}
 
           {/* Edit form — executive summary only in overview */}
-          {detailTab === 'overview' && overviewSubTab === 'summary' && editOpen && (
+          {detailTab === 'executive_summary' && editOpen && (
             <div style={{ marginTop: 12 }}>
               <div style={{ marginBottom: 10 }}>
                 <label className="field-label">Executive summary</label>
@@ -2549,11 +2688,11 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           )}
 
           {/* ── Tab CR mail ──────────────────────────────────────────── */}
-          {detailTab === 'cr_mail' && (
+          {detailTab === 'mail_mm' && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-              <strong>CR mail</strong>
-              <span className="muted" style={{ fontSize: 12 }}>Généré par l'agent IA · envoyable via Outlook / OneNote</span>
+              <strong>Mail MM</strong>
+              <span className="muted" style={{ fontSize: 12 }}>AI-generated · sendable via Outlook / OneNote</span>
             </div>
 
             {/* ── Bloc connexion Graph ── */}
@@ -2611,7 +2750,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                 <button className="btn-ghost" style={{ fontSize: 12 }}
                   onClick={() => { navigator.clipboard.writeText(selected.attributes.mail_cr || ''); flash('Copié'); }}>
-                  📋 Copier
+                  📋 Copy
                 </button>
 
                 <button className="btn-ghost" style={{ fontSize: 12 }}
@@ -2680,7 +2819,7 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
             {/* Édition directe */}
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 12 }}>
               <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditOpen(v => !v)}>
-                {editOpen ? '▲ Fermer l\'éditeur' : '✏️ Éditer le CR mail'}
+                {editOpen ? '▲ Fermer l\'éditeur' : '✏️ Edit Mail MM'}
               </button>
               {editOpen && (
                 <div style={{ marginTop: 10 }}>
@@ -2693,9 +2832,9 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                     placeholder="Bonjour,&#10;&#10;Voici le CR de la réunion…&#10;&#10;| Thème | Sujet | Statut | Q/Actions |&#10;|-------|-------|--------|-----------|"
                   />
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-                    <button className="btn-ghost" onClick={() => setEditOpen(false)}>Annuler</button>
+                    <button className="btn-ghost" onClick={() => setEditOpen(false)}>Cancel</button>
                     <button className="btn" onClick={handleSaveEdit} disabled={editSaving}>
-                      {editSaving ? 'Saving…' : 'Sauvegarder'}
+                      {editSaving ? 'Saving…' : 'Save'}
                     </button>
                   </div>
                 </div>
@@ -2705,15 +2844,15 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
           )}
 
           {/* ── Tab CR complet ───────────────────────────────────────── */}
-          {detailTab === 'cr_complet' && (
+          {detailTab === 'full_mm' && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-              <strong>CR complet</strong>
-              <span className="muted" style={{ fontSize: 12 }}>Compte-rendu détaillé</span>
+              <strong>Full MM</strong>
+              <span className="muted" style={{ fontSize: 12 }}>Detailed meeting minutes</span>
               {selected.attributes.minutes && (
                 <button className="btn-ghost" style={{ fontSize: 12 }}
                   onClick={() => { navigator.clipboard.writeText(selected.attributes.minutes || ''); flash('CR complet copié'); }}>
-                  📋 Copier
+                  📋 Copy
                 </button>
               )}
             </div>
@@ -2724,14 +2863,14 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
               </p>
             ) : (
               <div className="muted" style={{ fontSize: 13, fontStyle: 'italic', padding: '16px 0' }}>
-                Aucun CR complet. Utilisez l'agent Copilot pour générer le CR, puis sauvegardez-le via PATCH /api/meetings/:id (champ <code>minutes</code>).
+                No Full MM yet. Use the AI agent to generate it, then save via PATCH /api/meetings/:id (field <code>minutes</code>).
               </div>
             )}
 
             {/* Edit toggle */}
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 12 }}>
               <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditOpen(v => !v)}>
-                {editOpen ? '▲ Fermer l\'éditeur' : '✏️ Éditer le CR complet'}
+                {editOpen ? '▲ Fermer l\'éditeur' : '✏️ Edit Full MM'}
               </button>
               {editOpen && (
                 <div style={{ marginTop: 10 }}>
@@ -2741,12 +2880,12 @@ export function MeetingsPage({ initialSelectedId }: { initialSelectedId?: string
                     style={{ width: '100%', fontFamily: 'inherit', fontSize: 13 }}
                     value={editFields.minutes}
                     onChange={e => setEditFields(prev => ({ ...prev, minutes: e.target.value }))}
-                    placeholder="Compte-rendu de réunion…"
+                    placeholder="Meeting minutes…"
                   />
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-                    <button className="btn-ghost" onClick={() => setEditOpen(false)}>Annuler</button>
+                    <button className="btn-ghost" onClick={() => setEditOpen(false)}>Cancel</button>
                     <button className="btn" onClick={handleSaveEdit} disabled={editSaving}>
-                      {editSaving ? 'Saving…' : 'Sauvegarder'}
+                      {editSaving ? 'Saving…' : 'Save'}
                     </button>
                   </div>
                 </div>

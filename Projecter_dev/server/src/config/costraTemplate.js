@@ -105,8 +105,9 @@ const CELL_MAPPING = {
     // mitigation non-exécution (C103:M104 fusionné — cellule de saisie C103)
     { cell: 'C103', source: 'attribute', field: 'non_execution_mitigation' },
 
-    // 6. Budget T-shirt (C107 = label, zone de saisie = D107)
-    { cell: 'D107', source: 'attribute', field: 'budget_tshirt'         },
+    // 6. Budget T-shirt (label "6. Budget (T-shirt Sizing)" en B106 ;
+    //    zone de saisie = cellule fusionnée C108:D108 → on écrit dans C108)
+    { cell: 'C108', source: 'attribute', field: 'budget_tshirt'         },
 
     // 7. Scope — In : C112-C115 = labels "Élement X :", D112-D115 = zones de saisie
     { cell: 'D112', source: 'attribute', field: 'scope_in', multi: 0   },

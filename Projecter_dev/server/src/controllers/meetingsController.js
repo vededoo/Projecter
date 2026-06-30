@@ -3,6 +3,11 @@ const { query } = require('../utils/db');
 const { serialize, parseAttributes, errorResponse } = require('../utils/jsonapi');
 const logger = require('../utils/logger');
 
+function normalizeMeetingType(value) {
+  if (value === 'etnic_excom' || value === 'wbe_excom') return 'excom';
+  return value;
+}
+
 const COLS = `id, project_id, title, type, meeting_category, start_at, end_at, location, video_link,
               transformer_transcript_id, minutes, mail_cr, decisions, actions,
               raw_transcript, extraction_status, extraction_error,
@@ -15,14 +20,14 @@ const FIELDS = ['project_id', 'title', 'type', 'meeting_category', 'start_at', '
                 'raw_transcript', 'extraction_status', 'executive_summary', 'ai_report',
                 'audio_path', 'transcription_status'];
 
-const ENUM_CASTS = { type: '::meeting_type' };
+const ENUM_CASTS = {};
 
 exports.list = async (req, res, next) => {
   try {
     const { project_id, type, from, to, unlinked } = req.query;
     const conds = []; const params = [];
     if (project_id) { params.push(project_id); conds.push(`project_id = $${params.length}`); }
-    if (type)       { params.push(type);       conds.push(`type = $${params.length}::meeting_type`); }
+    if (type)       { params.push(normalizeMeetingType(type)); conds.push(`type = $${params.length}`); }
     if (from)       { params.push(from);       conds.push(`start_at >= $${params.length}::timestamptz`); }
     if (to)         { params.push(to);         conds.push(`start_at <= $${params.length}::timestamptz`); }
     if (unlinked === '1') conds.push(`transformer_transcript_id IS NULL`);
@@ -55,12 +60,12 @@ exports.get = async (req, res, next) => {
         [req.params.id]
       ),
       query(
-        `SELECT id, description, impact, position FROM meeting_decisions
+        `SELECT id, description, impact, position FROM decisions
            WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`,
         [req.params.id]
       ),
       query(
-        `SELECT id, description, owner_id, owner_raw, deadline, status, notes, meeting_topic_id FROM meeting_actions
+        `SELECT id, description, owner_id, owner_raw, deadline, status, notes, meeting_topic_id FROM actions
            WHERE meeting_id = $1 ORDER BY id`,
         [req.params.id]
       ),
@@ -83,9 +88,9 @@ exports.create = async (req, res, next) => {
     const { rows } = await query(
       `INSERT INTO meetings (project_id, title, type, meeting_category, start_at, end_at, location, video_link,
                              transformer_transcript_id, minutes, decisions, actions)
-       VALUES ($1, $2, $3::meeting_type, COALESCE($4,'formal'), $5::timestamptz, $6::timestamptz, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, COALESCE($4,'formal'), $5::timestamptz, $6::timestamptz, $7, $8, $9, $10, $11, $12)
        RETURNING ${COLS}`,
-      [a.project_id || null, a.title, a.type, a.meeting_category || null, a.start_at, a.end_at || null,
+      [a.project_id || null, a.title, normalizeMeetingType(a.type), a.meeting_category || null, a.start_at, a.end_at || null,
        a.location || null, a.video_link || null, a.transformer_transcript_id || null,
        a.minutes || null, a.decisions || null, a.actions || null]
     );
@@ -101,7 +106,7 @@ exports.update = async (req, res, next) => {
     for (const f of FIELDS) {
       if (a[f] !== undefined) {
         const cast = ENUM_CASTS[f] || ((f === 'start_at' || f === 'end_at') ? '::timestamptz' : '');
-        sets.push(`${f} = $${i++}${cast}`); vals.push(a[f]);
+        sets.push(`${f} = $${i++}${cast}`); vals.push(f === 'type' ? normalizeMeetingType(a[f]) : a[f]);
       }
     }
     if (!sets.length) return res.status(400).json(errorResponse(400, 'No attributes provided'));

@@ -29,7 +29,7 @@ exports.get = async (req, res, next) => {
     if (!rows[0]) return res.status(404).json(errorResponse(404, 'Project not found'));
     const { rows: meetings } = await query(
       `SELECT id, title, type, start_at, extraction_status, validated_at,
-              (SELECT COUNT(*) FROM meeting_actions WHERE meeting_id = m.id AND status = 'open') AS open_action_count
+              (SELECT COUNT(*) FROM actions WHERE meeting_id = m.id AND status = 'open') AS open_action_count
          FROM meetings m WHERE m.project_id = $1 ORDER BY m.start_at DESC LIMIT 100`,
       [rows[0].id]
     );

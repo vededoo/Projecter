@@ -4,23 +4,33 @@ import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { OrgUnitsPage } from './pages/OrgUnitsPage';
 import { RisksPage } from './pages/RisksPage';
+import { ActionsPage } from './pages/ActionsPage';
+import { DecisionsPage } from './pages/DecisionsPage';
+import { QuestionsPage } from './pages/QuestionsPage';
+import { IssuesPage } from './pages/IssuesPage';
 import { MeetingsPage } from './pages/MeetingsPage';
 import { SourcesPage } from './pages/SourcesPage';
 import { RolesPage } from './pages/RolesPage';
+import { MeetingTypesPage } from './pages/MeetingTypesPage';
 
-type View = 'projects' | 'contacts' | 'org' | 'risks' | 'meetings' | 'sources' | 'params-roles';
+type View = 'projects' | 'contacts' | 'org' | 'risks' | 'actions' | 'decisions' | 'questions' | 'issues' | 'meetings' | 'sources' | 'params-roles' | 'params-meeting-types';
 
 const NAV_MAIN: { key: View; label: string }[] = [
   { key: 'projects',  label: 'Projects' },
   { key: 'contacts',  label: 'Contacts' },
   { key: 'org',       label: 'Organization' },
   { key: 'risks',     label: 'Risks' },
+  { key: 'actions',   label: 'Actions' },
+  { key: 'decisions', label: 'Decisions' },
+  { key: 'questions', label: 'Questions' },
+  { key: 'issues',    label: 'Issues' },
   { key: 'meetings',  label: 'Meetings' },
   { key: 'sources',   label: 'Sources' },
 ];
 
 const NAV_PARAMS: { key: View; label: string }[] = [
   { key: 'params-roles', label: 'Roles' },
+  { key: 'params-meeting-types', label: 'Meeting Types' },
 ];
 
 // Icône Tune (Material Design) en SVG inline
@@ -54,9 +64,14 @@ function App() {
       case 'contacts': return <ContactsPage />;
       case 'org':      return <OrgUnitsPage />;
       case 'risks':    return <RisksPage />;
+      case 'actions':  return <ActionsPage />;
+      case 'decisions': return <DecisionsPage />;
+      case 'questions': return <QuestionsPage />;
+      case 'issues':    return <IssuesPage />;
       case 'meetings': return <MeetingsPage initialSelectedId={pendingMeeting} />;
       case 'sources':  return <SourcesPage />;
       case 'params-roles': return <RolesPage />;
+      case 'params-meeting-types': return <MeetingTypesPage />;
     }
   };
 

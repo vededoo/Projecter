@@ -4,6 +4,10 @@ const multer  = require('multer');
 const projects = require('../controllers/projectsController');
 const contacts = require('../controllers/contactsController');
 const risks    = require('../controllers/risksController');
+const actions  = require('../controllers/actionsController');
+const decisions = require('../controllers/decisionsController');
+const questions = require('../controllers/questionsController');
+const issues    = require('../controllers/issuesController');
 const members  = require('../controllers/projectMembersController');
 const documents = require('../controllers/documentsController');
 const meetings  = require('../controllers/meetingsController');
@@ -16,6 +20,7 @@ const projectTopics  = require('../controllers/projectTopicsController');
 const whisperCorr    = require('../controllers/whisperCorrectionsController');
 const graph          = require('../controllers/graphController');
 const roles          = require('../controllers/rolesController');
+const meetingTypes   = require('../controllers/meetingTypesController');
 const orgUnits       = require('../controllers/orgUnitsController');
 
 // Multer en mémoire — 20 Mo max
@@ -76,6 +81,42 @@ router.patch('/risks/:id', risks.update);
 router.delete('/risks/:id', risks.remove);
 router.post('/risks/:id/projects/:projectId', risks.linkProject);
 router.delete('/risks/:id/projects/:projectId', risks.unlinkProject);
+
+// Actions
+router.get('/actions', actions.list);
+router.get('/actions/:id', actions.get);
+router.post('/actions', actions.create);
+router.patch('/actions/:id', actions.update);
+router.delete('/actions/:id', actions.remove);
+router.post('/actions/:id/projects/:projectId', actions.linkProject);
+router.delete('/actions/:id/projects/:projectId', actions.unlinkProject);
+
+// Decisions
+router.get('/decisions', decisions.list);
+router.get('/decisions/:id', decisions.get);
+router.post('/decisions', decisions.create);
+router.patch('/decisions/:id', decisions.update);
+router.delete('/decisions/:id', decisions.remove);
+router.post('/decisions/:id/projects/:projectId', decisions.linkProject);
+router.delete('/decisions/:id/projects/:projectId', decisions.unlinkProject);
+
+// Questions
+router.get('/questions', questions.list);
+router.get('/questions/:id', questions.get);
+router.post('/questions', questions.create);
+router.patch('/questions/:id', questions.update);
+router.delete('/questions/:id', questions.remove);
+router.post('/questions/:id/projects/:projectId', questions.linkProject);
+router.delete('/questions/:id/projects/:projectId', questions.unlinkProject);
+
+// Issues
+router.get('/issues', issues.list);
+router.get('/issues/:id', issues.get);
+router.post('/issues', issues.create);
+router.patch('/issues/:id', issues.update);
+router.delete('/issues/:id', issues.remove);
+router.post('/issues/:id/projects/:projectId', issues.linkProject);
+router.delete('/issues/:id/projects/:projectId', issues.unlinkProject);
 
 // Project members
 router.get('/project-members', members.list);
@@ -202,5 +243,13 @@ router.get('/roles/:id',    roles.get);
 router.post('/roles',       roles.create);
 router.patch('/roles/:id',  roles.update);
 router.delete('/roles/:id', roles.remove);
+
+// Meeting types (référentiel éditable pour les réunions)
+router.get('/meeting-types',               meetingTypes.list);
+router.get('/meeting-types/:id',           meetingTypes.get);
+router.post('/meeting-types',              meetingTypes.create);
+router.patch('/meeting-types/reorder',     meetingTypes.reorder);
+router.patch('/meeting-types/:id',         meetingTypes.update);
+router.delete('/meeting-types/:id',        meetingTypes.remove);
 
 module.exports = router;

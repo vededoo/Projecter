@@ -116,7 +116,7 @@ server.tool(
 
       const meetings = await query(
         `SELECT m.id, m.title, m.type, m.start_at, m.extraction_status, m.validated_at,
-                (SELECT COUNT(*) FROM meeting_actions WHERE meeting_id = m.id AND status = 'open') AS open_actions
+                (SELECT COUNT(*) FROM actions WHERE meeting_id = m.id AND status = 'open') AS open_actions
            FROM meetings m WHERE m.project_id = $1 ORDER BY m.start_at DESC LIMIT 50`,
         [projectId]
       );
@@ -475,20 +475,20 @@ server.tool(
           `SELECT a.id, a.description, a.deadline, a.status::text, a.is_overdue,
                   a.owner_raw, a.owner_name, a.owner_email, ma.notes
              FROM v_open_actions a
-             LEFT JOIN meeting_actions ma ON ma.id = a.id
+             LEFT JOIN actions ma ON ma.id = a.id
             WHERE a.meeting_id = $1
             UNION ALL
            SELECT a.id, a.description, a.deadline, a.status::text,
                   false AS is_overdue, a.owner_raw,
                   c.last_name || ' ' || COALESCE(c.first_name,'') AS owner_name,
                   c.email AS owner_email, a.notes
-             FROM meeting_actions a LEFT JOIN contacts c ON c.id = a.owner_id
+             FROM actions a LEFT JOIN contacts c ON c.id = a.owner_id
             WHERE a.meeting_id = $1 AND a.status NOT IN ('open','overdue')
             ORDER BY deadline ASC NULLS LAST`,
           [meeting_id]
         ),
         query(
-          `SELECT id, description, impact, position FROM meeting_decisions WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`,
+          `SELECT id, description, impact, position FROM decisions WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`,
           [meeting_id]
         ),
         query(
@@ -524,8 +524,8 @@ server.tool(
                 extracted_at, validated_at, executive_summary,
                 transformer_transcript_id,
                 ${include_raw ? 'raw_transcript, minutes, decisions AS decisions_raw, actions AS actions_raw,' : ''}
-                (SELECT COUNT(*) FROM meeting_actions  WHERE meeting_id = m.id) AS action_count,
-                (SELECT COUNT(*) FROM meeting_decisions WHERE meeting_id = m.id) AS decision_count,
+                (SELECT COUNT(*) FROM actions  WHERE meeting_id = m.id) AS action_count,
+                (SELECT COUNT(*) FROM decisions WHERE meeting_id = m.id) AS decision_count,
                 (SELECT COUNT(*) FROM meeting_topics    WHERE meeting_id = m.id) AS topic_count
            FROM meetings m WHERE id = $1`,
         [meeting_id]
@@ -533,8 +533,8 @@ server.tool(
       if (!rows[0]) return err(`Meeting not found: ${meeting_id}`);
       const meeting = rows[0];
       const [actionsRes, decisionsRes, topicsRes] = await Promise.all([
-        query(`SELECT * FROM meeting_actions WHERE meeting_id = $1 ORDER BY id`, [meeting_id]),
-        query(`SELECT * FROM meeting_decisions WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`, [meeting_id]),
+        query(`SELECT * FROM actions WHERE meeting_id = $1 ORDER BY id`, [meeting_id]),
+        query(`SELECT * FROM decisions WHERE meeting_id = $1 ORDER BY position NULLS LAST, id`, [meeting_id]),
         query(`SELECT * FROM meeting_topics WHERE meeting_id = $1 ORDER BY position, id`, [meeting_id]),
       ]);
       return ok({
@@ -555,8 +555,9 @@ server.tool(
 server.tool(
   'ingest_meeting_extraction',
   [
-    'Write structured extraction results for a meeting: executive summary, topics, decisions, and actions.',
+    'Write structured extraction results for a meeting: executive summary, topics (the spine), decisions, actions, questions and issues.',
     'Each call REPLACES all existing structured data for that meeting (idempotent — safe to re-ingest).',
+    'Topics carry axes[] and are the spine: decisions/actions/questions/issues link to a topic via topic_position (1-based).',
     'owner_raw names will be resolved to contact ids via case-insensitive last_name match.',
     'Returns the inserted counts and any unresolved owner names.',
   ].join(' '),
@@ -569,19 +570,38 @@ server.tool(
       title: z.string(),
       summary: z.string().optional(),
       type: z.enum(['information', 'decision', 'action', 'risk', 'issue', 'open_point', 'other']).default('other'),
+      axes: z.array(z.enum(['scope','planning','budget','resources','governance','stakeholder','quality','security','change_management','benefits','procurement','support_run'])).default([]).optional().describe('project_axis values discussed in this topic — the topic is the spine'),
       project_topic_id: z.number().int().optional().describe('Link to an existing project_topics.id (optional)'),
     })).default([]).optional(),
     decisions: z.array(z.object({
       description: z.string(),
       impact: z.string().optional(),
       position: z.number().int().optional(),
+      topic_position: z.number().int().optional().describe('1-based position of the meeting topic this decision belongs to'),
     })).default([]).optional(),
     actions: z.array(z.object({
       description: z.string(),
       owner_raw: z.string().optional().describe('Name as extracted by LLM — will be resolved to contacts.id'),
       deadline: z.string().optional().describe('ISO date YYYY-MM-DD'),
       notes: z.string().optional(),
-      meeting_topic_id: z.number().int().optional().describe('Position (1-based) or DB id of the meeting_topic this action belongs to — used to build the mail CR table'),
+      topic_position: z.number().int().optional().describe('1-based position of the meeting topic this action belongs to'),
+    })).default([]).optional(),
+    questions: z.array(z.object({
+      title: z.string(),
+      status: z.enum(['to_ask','asked','reminded','partially_answered','answered','cancelled']).default('to_ask').optional(),
+      owner_raw: z.string().optional().describe('Name as extracted by LLM — resolved to contacts.id'),
+      due_date: z.string().optional().describe('ISO date YYYY-MM-DD'),
+      answer: z.string().optional(),
+      topic_position: z.number().int().optional().describe('1-based position of the meeting topic this question belongs to'),
+    })).default([]).optional(),
+    issues: z.array(z.object({
+      label: z.string(),
+      description: z.string().optional(),
+      severity: z.enum(['low','medium','high','critical']).default('medium').optional(),
+      status: z.enum(['open','investigating','resolved','closed','cancelled']).default('open').optional(),
+      owner_raw: z.string().optional().describe('Name as extracted by LLM — resolved to contacts.id'),
+      due_date: z.string().optional().describe('ISO date YYYY-MM-DD'),
+      topic_position: z.number().int().optional().describe('1-based position of the meeting topic this issue belongs to'),
     })).default([]).optional(),
     attendees: z.array(z.object({
       name_raw: z.string().describe('Participant name as detected in transcript'),
@@ -589,16 +609,29 @@ server.tool(
       status: z.enum(['present', 'excused', 'absent', 'invited']).default('present').optional(),
     })).default([]).optional().describe('Participants detected in transcript — resolved to contacts via ILIKE last_name'),
   },
-  async ({ meeting_id, executive_summary, raw_transcript, topics = [], decisions = [], actions = [], attendees = [] }) => {
+  async ({ meeting_id, executive_summary, raw_transcript, topics = [], decisions = [], actions = [], questions = [], issues = [], attendees = [] }) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
       // Verify meeting exists
       const { rows: [meeting] } = await client.query(
-        `SELECT id FROM meetings WHERE id = $1`, [meeting_id]
+        `SELECT id, project_id FROM meetings WHERE id = $1`, [meeting_id]
       );
       if (!meeting) { await client.query('ROLLBACK'); return err(`Meeting not found: ${meeting_id}`); }
+
+      // Helper: résout un nom (last_name, ou first+last) vers contacts.id
+      const resolveContact = async (name_raw) => {
+        if (!name_raw) return null;
+        const parts = name_raw.trim().split(/\s+/);
+        const { rows } = await client.query(
+          `SELECT id FROM contacts
+            WHERE last_name ILIKE $1 OR (last_name ILIKE $2 AND first_name ILIKE $3)
+            LIMIT 1`,
+          [parts[parts.length - 1], parts[parts.length - 1], parts[0]]
+        );
+        return rows[0] ? rows[0].id : null;
+      };
 
       // Update meeting metadata
       const updateFields = ['extraction_status = \'success\'', 'extracted_at = NOW()'];
@@ -611,57 +644,97 @@ server.tool(
       );
 
       // Delete existing structured data (idempotent)
-      await client.query('DELETE FROM meeting_actions   WHERE meeting_id = $1', [meeting_id]);
-      await client.query('DELETE FROM meeting_decisions WHERE meeting_id = $1', [meeting_id]);
+      await client.query('DELETE FROM actions          WHERE meeting_id = $1', [meeting_id]);
+      await client.query('DELETE FROM decisions        WHERE meeting_id = $1', [meeting_id]);
+      await client.query('DELETE FROM questions         WHERE meeting_id = $1', [meeting_id]);
+      await client.query('DELETE FROM issues            WHERE meeting_id = $1', [meeting_id]);
       await client.query('DELETE FROM meeting_topics    WHERE meeting_id = $1', [meeting_id]);
 
-      // Insert topics
+      // Insert topics — l'épine dorsale ; construit la map position→id pour les satellites
+      const topicIdByPosition = {};
       for (const t of topics) {
-        await client.query(
-          `INSERT INTO meeting_topics (meeting_id, position, title, summary, type, commitment_level, project_topic_id)
-           VALUES ($1, $2, $3, $4, $5::topic_type, $6::commitment_level, $7)`,
-          [meeting_id, t.position, t.title, t.summary || null, t.type || 'other', t.commitment_level || 'mentioned', t.project_topic_id || null]
+        const { rows: [insertedTopic] } = await client.query(
+          `INSERT INTO meeting_topics (meeting_id, position, title, summary, type, commitment_level, axes, project_topic_id)
+           VALUES ($1, $2, $3, $4, $5::topic_type, $6::commitment_level, $7::project_axis[], $8) RETURNING id`,
+          [meeting_id, t.position, t.title, t.summary || null, t.type || 'other', t.commitment_level || 'mentioned', t.axes || [], t.project_topic_id || null]
         );
+        topicIdByPosition[t.position] = insertedTopic.id;
       }
+      // Résout un topic_position (1-based) vers le meeting_topic_id inséré
+      const resolveTopicId = (pos) => (pos != null ? (topicIdByPosition[pos] || null) : null);
 
       // Insert decisions
       for (let i = 0; i < decisions.length; i++) {
         const d = decisions[i];
-        await client.query(
-          `INSERT INTO meeting_decisions (meeting_id, description, impact, position)
-           VALUES ($1, $2, $3, $4)`,
-          [meeting_id, d.description, d.impact || null, d.position ?? i + 1]
+        const { rows: [insertedDecision] } = await client.query(
+          `INSERT INTO decisions (meeting_id, description, impact, position, meeting_topic_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [meeting_id, d.description, d.impact || null, d.position ?? i + 1, resolveTopicId(d.topic_position)]
         );
+        // Rattache la décision au projet de la réunion (relation N-N)
+        if (meeting.project_id) {
+          await client.query(
+            `INSERT INTO decision_projects (decision_id, project_id)
+             VALUES ($1, $2) ON CONFLICT (decision_id, project_id) DO NOTHING`,
+            [insertedDecision.id, meeting.project_id]
+          );
+        }
       }
 
       // Insert actions — resolve owner names to contacts.id
       const unresolved = [];
       for (const a of actions) {
-        let owner_id = null;
-        if (a.owner_raw) {
-          const nameParts = a.owner_raw.trim().split(/\s+/);
-          // Try last_name match first, then first+last
-          const { rows: contacts } = await client.query(
-            `SELECT id FROM contacts
-              WHERE last_name ILIKE $1 OR (last_name ILIKE $2 AND first_name ILIKE $3)
-              LIMIT 1`,
-            [
-              nameParts[nameParts.length - 1],
-              nameParts[nameParts.length - 1],
-              nameParts[0],
-            ]
-          );
-          if (contacts[0]) {
-            owner_id = contacts[0].id;
-          } else {
-            unresolved.push(a.owner_raw);
-          }
-        }
-        await client.query(
-          `INSERT INTO meeting_actions (meeting_id, owner_id, owner_raw, description, deadline, notes, meeting_topic_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [meeting_id, owner_id, a.owner_raw || null, a.description, a.deadline || null, a.notes || null, a.meeting_topic_id || null]
+        const owner_id = await resolveContact(a.owner_raw);
+        if (a.owner_raw && !owner_id) unresolved.push(a.owner_raw);
+        const { rows: [insertedAction] } = await client.query(
+          `INSERT INTO actions (meeting_id, owner_id, owner_raw, description, deadline, notes, meeting_topic_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [meeting_id, owner_id, a.owner_raw || null, a.description, a.deadline || null, a.notes || null, resolveTopicId(a.topic_position)]
         );
+        // Rattache l'action au projet de la réunion (relation N-N)
+        if (meeting.project_id) {
+          await client.query(
+            `INSERT INTO action_projects (action_id, project_id)
+             VALUES ($1, $2) ON CONFLICT (action_id, project_id) DO NOTHING`,
+            [insertedAction.id, meeting.project_id]
+          );
+        }
+      }
+
+      // Insert questions — lien topic + relation N-N projet
+      for (const q of questions) {
+        const owner_id = await resolveContact(q.owner_raw);
+        if (q.owner_raw && !owner_id) unresolved.push(q.owner_raw);
+        const { rows: [insertedQuestion] } = await client.query(
+          `INSERT INTO questions (meeting_id, meeting_topic_id, title, status, owner_contact_id, due_date, answer)
+           VALUES ($1, $2, $3, $4::question_status, $5, $6, $7) RETURNING id`,
+          [meeting_id, resolveTopicId(q.topic_position), q.title, q.status || 'to_ask', owner_id, q.due_date || null, q.answer || null]
+        );
+        if (meeting.project_id) {
+          await client.query(
+            `INSERT INTO question_projects (question_id, project_id)
+             VALUES ($1, $2) ON CONFLICT (question_id, project_id) DO NOTHING`,
+            [insertedQuestion.id, meeting.project_id]
+          );
+        }
+      }
+
+      // Insert issues — lien topic + relation N-N projet
+      for (const iss of issues) {
+        const owner_id = await resolveContact(iss.owner_raw);
+        if (iss.owner_raw && !owner_id) unresolved.push(iss.owner_raw);
+        const { rows: [insertedIssue] } = await client.query(
+          `INSERT INTO issues (meeting_id, meeting_topic_id, label, description, severity, status, owner_contact_id, due_date)
+           VALUES ($1, $2, $3, $4, $5::issue_severity, $6::issue_status, $7, $8) RETURNING id`,
+          [meeting_id, resolveTopicId(iss.topic_position), iss.label, iss.description || null, iss.severity || 'medium', iss.status || 'open', owner_id, iss.due_date || null]
+        );
+        if (meeting.project_id) {
+          await client.query(
+            `INSERT INTO issue_projects (issue_id, project_id)
+             VALUES ($1, $2) ON CONFLICT (issue_id, project_id) DO NOTHING`,
+            [insertedIssue.id, meeting.project_id]
+          );
+        }
       }
 
       // Insert / upsert attendees — resolve via ILIKE last_name
@@ -695,7 +768,7 @@ server.tool(
       await client.query('COMMIT');
       return ok({
         meeting_id,
-        inserted: { topics: topics.length, decisions: decisions.length, actions: actions.length, attendees: attendees.length - unresolved_attendees.length },
+        inserted: { topics: topics.length, decisions: decisions.length, actions: actions.length, questions: questions.length, issues: issues.length, attendees: attendees.length - unresolved_attendees.length },
         unresolved_owners: unresolved,
         unresolved_attendees,
       });
@@ -754,7 +827,7 @@ server.tool(
     id:         z.number().int().optional().describe('project_topics.id — omit to create'),
     title:      z.string().describe('Short label for this strategic topic'),
     status:     z.string().optional().describe('Free-form status or project_status value'),
-    axes:       z.array(z.enum(['scope','planning','budget','resources','risk','governance','stakeholder','quality','security','change_management','benefits','dependencies','support_run'])).optional().describe('Axes this topic relates to'),
+    axes:       z.array(z.enum(['scope','planning','budget','resources','governance','stakeholder','quality','security','change_management','benefits','procurement','support_run'])).optional().describe('Axes this topic relates to'),
     synthesis:  z.string().optional().describe('Synthesis / current state narrative'),
     confidence: z.enum(['low','medium','high']).optional().describe('Confidence level in the synthesis'),
     owner:      z.string().optional().describe('Owner name (free text)'),
@@ -829,8 +902,8 @@ server.tool(
                 m.extraction_status, m.extracted_at, m.validated_at,
                 p.code AS project_code, p.title AS project_title,
                 m.raw_transcript IS NOT NULL AS has_transcript,
-                (SELECT COUNT(*) FROM meeting_actions  WHERE meeting_id = m.id) AS action_count,
-                (SELECT COUNT(*) FROM meeting_decisions WHERE meeting_id = m.id) AS decision_count
+                (SELECT COUNT(*) FROM actions  WHERE meeting_id = m.id) AS action_count,
+                (SELECT COUNT(*) FROM decisions WHERE meeting_id = m.id) AS decision_count
            FROM meetings m
            LEFT JOIN projects p ON p.id = m.project_id
            ${where}
@@ -1271,13 +1344,17 @@ commitment_level guide:
 - decided      : décision formelle prise en séance
 
 Do not omit topics. Err on the side of more topics.
+Each topic carries axes[] (project_axis values it touches) and is the SPINE: every decision, action, question and issue must reference its topic via topic_position (the 1-based position of the topic).
 If this meeting introduces a new recurring strategic theme not yet in project_topics, call upsert_project_topic to create it, then use the returned id as project_topic_id.
 
 STEP 5 — Build decisions
-For EACH explicit decision or consensus reached: description (what was decided), impact (why it matters), position.
+For EACH explicit decision or consensus reached: description (what was decided), impact (why it matters), position, topic_position (which topic it belongs to).
 
-STEP 6 — Build actions
-For EACH concrete action item: description (what must be done), owner_raw (last name only, as mentioned in transcript), deadline (YYYY-MM-DD or null if not specified), notes (context if relevant).
+STEP 6 — Build actions, questions and issues
+- actions: for EACH concrete action item: description, owner_raw (last name only), deadline (YYYY-MM-DD or null), notes, topic_position.
+- questions: for EACH open question to ask a third party: title, owner_raw (who must ask), due_date, topic_position. status defaults to 'to_ask'.
+- issues: for EACH problem/blocker raised: label, description, severity (low|medium|high|critical), owner_raw, due_date, topic_position. status defaults to 'open'.
+Do NOT duplicate the same item across registers — pick the single best register for each.
 
 STEP 7 — Ingest and verify
 Call: ingest_meeting_extraction({
@@ -1286,6 +1363,8 @@ Call: ingest_meeting_extraction({
   topics: [...],
   decisions: [...],
   actions: [...],
+  questions: [...],
+  issues: [...],
   attendees: [{ name_raw: "...", role: "...", status: "present" }, ...]
 })
 Then call: get_meeting_actions({ meeting_id: ${meetingId} }) to confirm everything is stored.
@@ -1325,8 +1404,8 @@ server.resource(
 - risk_level: low|medium|high|critical
 - rag_color: green|amber|red|grey
 - confidence_level: low|medium|high
-- project_axis: scope|planning|budget|resources|risk|governance|stakeholder|quality|security|change_management|benefits|dependencies|support_run
-- meeting_type: etnic_excom|wbe_excom|governance_committee|steering_committee|portfolio_committee|technical_wg|functional_wg|procurement_wg|kickoff|follow_up|other
+- project_axis: scope|planning|budget|resources|governance|stakeholder|quality|security|change_management|benefits|procurement|support_run
+- meeting_type: follow_up|functional_wg|technical_wg|procurement_wg|governance_committee|excom|steering_committee|portfolio_committee|kickoff|other|mail|chat|call|encounter
 - document_type: mandate|briefing_note|dip|project_sheet|meeting_minutes|appendix|other
 - membership_role: manager|team_leader|member|consultant|advisor|analyst|detached
 
@@ -1345,7 +1424,7 @@ server.resource(
            highlights, concerns, next_steps, attributes JSONB)
 - project_members(id, project_id, contact_id, role[project_role], effort_md, display_order)
 - project_topics(id, project_id, title, status[project_status or free text],
-                 axes[] project_axis — ARRAY of project_axis values, e.g. {resources,risk},
+                 axes[] project_axis — ARRAY of project_axis values, e.g. {resources,procurement},
                  synthesis TEXT, confidence[confidence_level],
                  owner TEXT, due_date DATE, created_at, updated_at)
   → Persistent strategic topics for a project (not tied to a single meeting).
@@ -1355,7 +1434,7 @@ server.resource(
 - v_risks VIEW — risks with projects[] aggregated as JSON + owner_name
 - documents(id, project_id, type[document_type], version, status[document_status], attributes JSONB)
 - document_files(id, document_id, storage_path, extracted_text)
-- meetings(id, project_id, title, type[meeting_type], start_at, location,
+- meetings(id, project_id, title, type[meeting_types.code], start_at, location,
            meeting_category TEXT,
            audio_path TEXT, ai_report TEXT,
            transformer_transcript_id,
@@ -1368,12 +1447,13 @@ server.resource(
   → Speaker tracks from audio diarization (SPEAKER_00, [LV], etc.).
 - meeting_topics(id, meeting_id, position, title, summary,
                  type[topic_type], commitment_level[commitment_level],
+                 axes[] project_axis — ARRAY of project_axis values (axes discussed in this topic),
                  project_topic_id→project_topics FK (nullable),
                  linked_object_type TEXT (nullable), linked_object_id INT (nullable))
   → project_topic_id links this meeting topic to a strategic project_topic.
   → linked_object_type/id for future links to risks, documents, etc.
-- meeting_decisions(id, meeting_id, description, impact, position, driver_contact_id, approver_contact_id, is_reversible)
-- meeting_actions(id, meeting_id, owner_id→contacts, owner_raw, description, deadline, status[action_status], notes)
+- decisions(id, meeting_id, description, impact, position, driver_contact_id, approver_contact_id, is_reversible, meeting_topic_id) — N-N projets via decision_projects
+- actions(id, meeting_id, owner_id→contacts, owner_raw, description, deadline, status[action_status], notes, meeting_topic_id) — N-N projets via action_projects
 - v_open_actions VIEW — open actions with owner/meeting/project context
 - timeline_events(id, project_id, label, type[timeline_event_type], event_date)
 - sources(id, title, source_type, description, extracted_text,

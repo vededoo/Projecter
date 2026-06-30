@@ -102,6 +102,27 @@ interface Risk {
   label: string; probability: string | null; impact: string | null;
   severity: string | null; status: string; due_date: string | null;
 }
+interface Action {
+  id: string;
+  description: string; deadline: string | null; status: string;
+  owner_name: string | null; is_overdue: boolean;
+}
+interface Decision {
+  id: string;
+  description: string; impact: string | null; position: number | null;
+  is_reversible: boolean | null; driver_name: string | null; approver_name: string | null;
+}
+interface Question {
+  id: string;
+  title: string; status: string; owner_name: string | null;
+  due_date: string | null; is_overdue: boolean; answer: string | null;
+  asked_to: { contact_id: number; contact_name: string }[];
+}
+interface Issue {
+  id: string;
+  label: string; severity: string; status: string; owner_name: string | null;
+  due_date: string | null; is_overdue: boolean; resolution: string | null;
+}
 interface Doc {
   id: string; type: string; title: string | null; version: string;
   status: string; generated_from_template: boolean;
@@ -191,9 +212,9 @@ const RAG_DOT_COLORS: Record<string, string> = {
 const RAG_VALUES = ['green', 'amber', 'red', 'grey'] as const;
 
 const AXES = [
-  'scope', 'planning', 'budget', 'resources', 'risk',
+  'scope', 'planning', 'budget', 'resources',
   'governance', 'stakeholder', 'quality', 'security',
-  'change_management', 'benefits', 'dependencies', 'support_run',
+  'change_management', 'benefits', 'procurement', 'support_run',
 ] as const;
 
 const CONFIDENCE_COLORS: Record<string, string> = {
@@ -211,7 +232,7 @@ function fmtSize(b: number | null) {
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type TabKey = 'overview' | 'topics' | 'stakeholders' | 'meetings' | 'administration' | 'sources' | 'costra';
+type TabKey = 'overview' | 'topics' | 'stakeholders' | 'meetings' | 'actions' | 'decisions' | 'questions' | 'issues' | 'administration' | 'sources' | 'costra';
 
 export function ProjectDetailPage({ id, onBack, onGoToMeeting }: { id: string; onBack: () => void; onGoToMeeting?: (meetingId: string) => void }) {
   // ── Tab navigation ─────────────────────────────────────────────────────────
@@ -225,6 +246,10 @@ export function ProjectDetailPage({ id, onBack, onGoToMeeting }: { id: string; o
   const [showAddTopic, setShowAddTopic] = useState(false);
   const [members, setMembers]   = useState<MemberItem[]>([]);
   const [risks, setRisks]       = useState<Risk[]>([]);
+  const [actions, setActions]   = useState<Action[]>([]);
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [issues, setIssues] = useState<Issue[]>([]);
   const [docs, setDocs]         = useState<Doc[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [sources, setSources]     = useState<SourceItem[]>([]);
@@ -331,6 +356,10 @@ export function ProjectDetailPage({ id, onBack, onGoToMeeting }: { id: string; o
       api.get<JsonApiOne<Project>>(`/projects/${id}`),
       api.get<JsonApiList<MemberItem>>(`/project-members?project_id=${id}`),
       api.get<JsonApiList<Risk>>(`/risks?project_id=${id}`),
+      api.get<JsonApiList<Action>>(`/actions?project_id=${id}`),
+      api.get<JsonApiList<Decision>>(`/decisions?project_id=${id}`),
+      api.get<JsonApiList<Question>>(`/questions?project_id=${id}`),
+      api.get<JsonApiList<Issue>>(`/issues?project_id=${id}`),
       api.get<JsonApiList<Doc>>(`/documents?project_id=${id}`),
       api.get<JsonApiList<Meeting>>(`/meetings?project_id=${id}`),
       api.get<JsonApiList<SourceItem>>(`/sources?project_id=${id}`),
@@ -338,12 +367,16 @@ export function ProjectDetailPage({ id, onBack, onGoToMeeting }: { id: string; o
       api.get<JsonApiList<ProjectTopic>>(`/project-topics?project_id=${id}`),
       api.get<JsonApiList<{ label: string; active: boolean }>>('/roles'),
     ])
-      .then(([p, m, r, d, mt, s, tmpl, tp, roles]) => {
+      .then(([p, m, r, ac, dec, qn, iss, d, mt, s, tmpl, tp, roles]) => {
         const proj = p.data.attributes;
         setProject(proj);
         setStatusBriefLocal(proj.status_brief || '');
         setMembers(m.data.map(x => ({ ...x.attributes, id: x.id })));
         setRisks(r.data.map(x => x.attributes));
+        setActions(ac.data.map(x => ({ ...x.attributes, id: x.id })));
+        setDecisions(dec.data.map(x => ({ ...x.attributes, id: x.id })));
+        setQuestions(qn.data.map(x => ({ ...x.attributes, id: x.id })));
+        setIssues(iss.data.map(x => ({ ...x.attributes, id: x.id })));
         setDocs(d.data.map(x => ({ ...x.attributes, id: x.id })));
         setMeetings(mt.data.map(x => ({ ...x.attributes, id: x.id })));
         setSources(s.data.map(x => ({ ...x.attributes, id: x.id })));
@@ -503,6 +536,10 @@ export function ProjectDetailPage({ id, onBack, onGoToMeeting }: { id: string; o
     { key: 'topics',          label: `Topics (${topics.length})` },
     { key: 'stakeholders',    label: `Stakeholders (${members.length})` },
     { key: 'meetings',        label: `Meetings (${meetings.length})` },
+    { key: 'actions',         label: `Actions (${actions.length})` },
+    { key: 'decisions',       label: `Decisions (${decisions.length})` },
+    { key: 'questions',       label: `Questions (${questions.length})` },
+    { key: 'issues',          label: `Issues (${issues.length})` },
     { key: 'administration',  label: '⚙ Administration' },
     { key: 'sources',         label: `Sources (${sources.length})` },
     { key: 'costra',          label: '📋 COSTRA' },
@@ -1195,6 +1232,111 @@ export function ProjectDetailPage({ id, onBack, onGoToMeeting }: { id: string; o
               ) : <div className="empty">No documents yet.</div>}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: ACTIONS
+      ══════════════════════════════════════════════════════════════════════ */}
+      {tab === 'actions' && (
+        <div className="card">
+          <h3>Actions ({actions.length})</h3>
+          {actions.length ? (
+            <table>
+              <thead><tr><th>Action</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead>
+              <tbody>{actions.map(a => (
+                <tr key={a.id}>
+                  <td>{a.description}</td>
+                  <td className="muted">{a.owner_name || '—'}</td>
+                  <td className="muted" style={a.is_overdue ? { color: '#c62828', fontWeight: 600 } : undefined}>
+                    {a.deadline ? a.deadline.slice(0, 10) : '—'}{a.is_overdue && ' ⚠'}
+                  </td>
+                  <td><span className="badge">{a.status}</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          ) : <div className="empty">No actions yet. Actions are captured from meetings or added in the Actions register.</div>}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: DECISIONS
+      ══════════════════════════════════════════════════════════════════════ */}
+      {tab === 'decisions' && (
+        <div className="card">
+          <h3>Decisions ({decisions.length})</h3>
+          {decisions.length ? (
+            <table>
+              <thead><tr><th>Decision</th><th>Driver</th><th>Approver</th><th>Reversible</th></tr></thead>
+              <tbody>{decisions.map(d => (
+                <tr key={d.id}>
+                  <td>
+                    {d.description}
+                    {d.impact && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{d.impact}</div>}
+                  </td>
+                  <td className="muted">{d.driver_name || '—'}</td>
+                  <td className="muted">{d.approver_name || '—'}</td>
+                  <td>{d.is_reversible == null ? <span className="muted">—</span> : <span className="badge">{d.is_reversible ? 'reversible' : 'irreversible'}</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          ) : <div className="empty">No decisions yet. Decisions are captured from meetings or added in the Decisions register.</div>}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: QUESTIONS
+      ══════════════════════════════════════════════════════════════════════ */}
+      {tab === 'questions' && (
+        <div className="card">
+          <h3>Questions ({questions.length})</h3>
+          {questions.length ? (
+            <table>
+              <thead><tr><th>Question</th><th>Owner</th><th>Asked to</th><th>Due</th><th>Status</th></tr></thead>
+              <tbody>{questions.map(q => (
+                <tr key={q.id}>
+                  <td>
+                    {q.title}
+                    {q.answer && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>↳ {q.answer}</div>}
+                  </td>
+                  <td className="muted">{q.owner_name || '—'}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{q.asked_to?.length ? q.asked_to.map(c => c.contact_name).join(', ') : '—'}</td>
+                  <td className="muted" style={q.is_overdue ? { color: '#c62828', fontWeight: 600 } : undefined}>
+                    {q.due_date ? q.due_date.slice(0, 10) : '—'}{q.is_overdue && ' ⚠'}
+                  </td>
+                  <td><span className="badge">{q.status}</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          ) : <div className="empty">No questions yet. Questions are captured from meetings or added in the Questions register.</div>}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: ISSUES
+      ══════════════════════════════════════════════════════════════════════ */}
+      {tab === 'issues' && (
+        <div className="card">
+          <h3>Issues ({issues.length})</h3>
+          {issues.length ? (
+            <table>
+              <thead><tr><th>Issue</th><th>Severity</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead>
+              <tbody>{issues.map(x => (
+                <tr key={x.id}>
+                  <td>
+                    {x.label}
+                    {x.resolution && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>↳ {x.resolution}</div>}
+                  </td>
+                  <td><span className="badge">{x.severity}</span></td>
+                  <td className="muted">{x.owner_name || '—'}</td>
+                  <td className="muted" style={x.is_overdue ? { color: '#c62828', fontWeight: 600 } : undefined}>
+                    {x.due_date ? x.due_date.slice(0, 10) : '—'}{x.is_overdue && ' ⚠'}
+                  </td>
+                  <td><span className="badge">{x.status}</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          ) : <div className="empty">No issues yet. Issues are captured from meetings or added in the Issues register.</div>}
         </div>
       )}
 

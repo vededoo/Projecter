@@ -164,7 +164,7 @@ exports.listEvents = async (req, res, next) => {
  *   { data: { type: 'outlook-import', attributes: {
  *       event_id:   string  (ID Graph de l'événement — obligatoire)
  *       project_id: number  (optionnel)
- *       type:       string  (meeting_type, défaut: 'other')
+ *       type:       string  (meeting_types.code, défaut: 'other')
  *   }}}
  *
  * Comportement :
@@ -204,12 +204,12 @@ exports.importEvent = async (req, res, next) => {
     const { rows } = await query(
       `INSERT INTO meetings
          (project_id, title, type, start_at, end_at, location, video_link, created_at, updated_at)
-       VALUES ($1, $2, $3::meeting_type, $4::timestamptz, $5::timestamptz, $6, $7, NOW(), NOW())
+       VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6, $7, NOW(), NOW())
        RETURNING id, project_id, title, type, start_at, end_at, location, video_link, created_at, updated_at`,
       [
         project_id || null,
         ev.subject || '(no subject)',
-        meetingType || 'other',
+        meetingType === 'etnic_excom' || meetingType === 'wbe_excom' ? 'excom' : (meetingType || 'other'),
         startAt,
         endAt,
         ev.location?.displayName || null,

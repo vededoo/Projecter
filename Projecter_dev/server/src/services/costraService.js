@@ -185,12 +185,20 @@ function parseWorkbookSheets(zip) {
   }
 
   // sheet name → rId → target
+  // Le nom de feuille est encodé XML dans workbook.xml (ex: "4. Dates &amp; Impacts").
+  // On le décode pour matcher les clés de CELL_MAPPING (ex: "4. Dates & Impacts").
+  const decodeXml = (s) => s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
   const sheetMap    = {};
   const sheetRegex  = /<sheet\b[^>]*\bname="([^"]+)"[^>]*\br:id="([^"]+)"/g;
   while ((m = sheetRegex.exec(workbookXml)) !== null) {
     const target = relMap[m[2]];
     if (target) {
-      sheetMap[m[1]] = target.startsWith('xl/') ? target : `xl/${target}`;
+      sheetMap[decodeXml(m[1])] = target.startsWith('xl/') ? target : `xl/${target}`;
     }
   }
 
