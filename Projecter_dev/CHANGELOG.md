@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2] - 2026-06-30
+
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.1.1
+## 🔹 Autres changements
+- fix(deploy): handle stopped/errored PM2 processes with delete+start
+
 ## [1.1.1] - 2026-06-30
 
 ## 📚 Documentation
