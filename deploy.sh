@@ -5,17 +5,16 @@
 # Usage: ./deploy.sh <version>
 # Exemple: ./deploy.sh 0.1.0
 #
-# Pattern standard MSA :
+# Pattern standard MSA (identique à Languapp/Services) :
 #  1. Vérifie qu'il n'y a pas de changements non commités (DEV)
 #  2. Génère un changelog depuis les commits conventionnels
 #  3. Bump version dans client/package.json
 #  4. Tag annoté + push tag + main
 #  5. Met à jour CHANGELOG.md
-#  6. Si Projecter_prd absent → git clone (1er déploiement)
-#  7. Sinon → fetch + checkout du tag
-#  8. Applique les configs PRD (.env serveur + client)
-#  9. npm install + build client (production)
-# 10. Démarre / redémarre les processus PM2 PRD
+#  6. git archive du tag → extraction plate de Projecter_dev/ dans Projecter_prd/
+#  7. Applique les configs PRD (.env serveur + client)
+#  8. npm install + build client (production)
+#  9. Migrations DB + démarre / redémarre les processus PM2 PRD
 # ════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -33,7 +32,7 @@ fi
 VERSION="$1"
 TAG_NAME="v$VERSION"
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEV_DIR="$BASE_DIR"
+DEV_DIR="$BASE_DIR/Projecter_dev"
 PROD_DIR="$BASE_DIR/Projecter_prd"
 PROD_APP_DIR="$PROD_DIR"
 
@@ -64,7 +63,7 @@ fi
 
 cd "$BASE_DIR"
 if [ -n "$(git status --porcelain)" ]; then
-    echo "⚠️  ATTENTION: Changements non commités dans Projecter :"
+    echo "⚠️  ATTENTION: Changements non commités dans Projecter_dev :"
     git status --short
     echo ""
     echo "Continuer quand même ? (o/n)"
@@ -180,25 +179,41 @@ git commit -m "docs: mise à jour du CHANGELOG pour v$VERSION" || true
 git push origin main || true
 
 # ─────────────────────────────────────────────────────────
-# ÉTAPE 4 : Préparer Projecter_prd
-# ─────────────────────────────────────────────────────────
+# ÉTAPE 4 : Extraction du tag vers Projecter_prd (git archive plat)
+# ──────────────────────────────────────────────
+# Pattern identique à Languapp/Services : on extrait Projecter_dev/ du tag
+# directement à la racine de Projecter_prd/ (pas de nidification
+# Projecter_prd/Projecter_dev/). PROD_APP_DIR reste donc = PROD_DIR.
 
-if [ ! -d "$PROD_DIR" ]; then
-    echo "📥 Premier déploiement : clonage de $REMOTE_URL → Projecter_prd..."
-    cd "$BASE_DIR"
-    git clone "$REMOTE_URL" Projecter_prd
-fi
+echo ""
+echo "🚀 Extraction du tag $TAG_NAME vers Projecter_prd..."
+cd "$BASE_DIR"
 
-echo "🔄 Mise à jour de Projecter_prd vers $TAG_NAME..."
-cd "$PROD_DIR"
-if [ -n "$(git status --porcelain)" ]; then
-    echo "💾 Sauvegarde des modifications locales de PRD..."
-    git stash
+# Sauvegarder les données runtime persistantes avant nettoyage
+TMP_KEEP="$(mktemp -d)"
+[ -d "$PROD_DIR/storage" ] && cp -R "$PROD_DIR/storage" "$TMP_KEEP/storage" 2>/dev/null || true
+[ -d "$PROD_DIR/logs" ] && cp -R "$PROD_DIR/logs" "$TMP_KEEP/logs" 2>/dev/null || true
+[ -f "$PROD_DIR/server/.env" ] && cp "$PROD_DIR/server/.env" "$TMP_KEEP/server.env" 2>/dev/null || true
+[ -f "$PROD_DIR/client/.env" ] && cp "$PROD_DIR/client/.env" "$TMP_KEEP/client.env" 2>/dev/null || true
+
+mkdir -p "$PROD_DIR"
+echo "🧹 Nettoyage de Projecter_prd..."
+find "$PROD_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.DS_Store' -exec rm -rf {} \;
+
+# Extraire uniquement Projecter_dev/ du tag, en enlevant le préfixe → structure plate
+git archive "$TAG_NAME" Projecter_dev/ | tar -x -C "$PROD_DIR" --strip-components=1
+echo "✅ Extraction terminée (structure plate : $PROD_DIR/client/, server/, etc.)"
+
+# Restaurer les données runtime
+[ -d "$TMP_KEEP/storage" ] && { rm -rf "$PROD_DIR/storage"; cp -R "$TMP_KEEP/storage" "$PROD_DIR/storage"; echo "   🔄 storage/ restauré"; }
+[ -d "$TMP_KEEP/logs" ] && { rm -rf "$PROD_DIR/logs"; cp -R "$TMP_KEEP/logs" "$PROD_DIR/logs"; echo "   🔄 logs/ restauré"; }
+rm -rf "$TMP_KEEP"
+
+# Supprimer l'ancien .git dans PRD (plus besoin avec git archive)
+if [ -d "$PROD_DIR/.git" ]; then
+    rm -rf "$PROD_DIR/.git"
+    echo "   🗑️  Ancien .git supprimé de PRD"
 fi
-git fetch --tags
-sleep 1
-git checkout "$TAG_NAME"
-echo "✅ Projecter_prd sur $TAG_NAME"
 
 # ─────────────────────────────────────────────────────────
 # ÉTAPE 5 : Configurations PRD
