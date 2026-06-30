@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3] - 2026-06-30
+
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.1.2
+## 🔹 Autres changements
+- fix(deploy): always delete+start PM2 processes (bulletproof)
+
 ## [1.1.2] - 2026-06-30
 
 ## 📚 Documentation
