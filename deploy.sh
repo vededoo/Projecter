@@ -327,15 +327,25 @@ echo "🔄 (Re)démarrage des services PM2 de production..."
 cd "$BASE_DIR"
 
 for process in projecter_prd_server projecter_prd_client; do
-    if pm2 describe "$process" >/dev/null 2>&1; then
-        pm2 restart "$process"
-        echo "   ✅ $process redémarré"
+    # Status possible: online | stopped | errored | <vide si absent>
+    status=$(pm2 jlist 2>/dev/null | node -e "
+      let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+        try{const a=JSON.parse(d); const p=a.find(x=>x.name==='$process');
+          console.log(p?p.pm2_env.status:'absent');}catch(e){console.log('absent');}
+      });" 2>/dev/null || echo "absent")
+
+    if [ "$status" = "online" ]; then
+        pm2 restart "$process" --update-env && echo "   ✅ $process redémarré"
+    elif [ "$status" = "absent" ]; then
+        pm2 start ecosystem.config.js --only "$process" && echo "   ✅ $process démarré (nouveau)"
     else
-        pm2 start ecosystem.config.js --only "$process"
-        echo "   ✅ $process démarré"
+        # stopped/errored: delete + start propre (sinon restart peut échouer avec "Process N not found")
+        echo "   ♻️  $process est $status → delete + start propre"
+        pm2 delete "$process" >/dev/null 2>&1
+        pm2 start ecosystem.config.js --only "$process" && echo "   ✅ $process démarré"
     fi
 done
-pm2 save
+pm2 save --force >/dev/null 2>&1
 
 # ─────────────────────────────────────────────────────────
 # RÉSUMÉ
