@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1] - 2026-06-30
+
+## 📚 Documentation
+- mise à jour du CHANGELOG pour v1.1.0
+## 🔹 Autres changements
+- fix(migrate): skip files prefixed with _ (utility scripts, not migrations)
+
 ## [1.1.0] - 2026-06-30
 
 ## ✨ Nouvelles fonctionnalités
